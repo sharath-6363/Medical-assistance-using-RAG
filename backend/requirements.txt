@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pytesseract
+pdf2image
+PyMuPDF
+langchain
+faiss-cpu
+sentence-transformers
+pdfplumber
+Pillow
+langchain-community
+numpy
+scikit-learn
+python-docx

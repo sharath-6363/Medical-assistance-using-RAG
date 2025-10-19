@@ -1,0 +1,365 @@
+{
+  "patterns": {
+    "name": {
+      "category": "patient_info",
+      "original_queries": [
+        "what is name",
+        "name"
+      ],
+      "success_count": 3,
+      "total_count": 3,
+      "confidence": 1.0
+    },
+    "consultant": {
+      "category": "patient_info",
+      "original_queries": [
+        "Who is the consultant",
+        "consultant",
+        "who is the consultant"
+      ],
+      "success_count": 3,
+      "total_count": 3,
+      "confidence": 1.0
+    },
+    "hospital name": {
+      "category": "patient_info",
+      "original_queries": [
+        "What is the hospital name"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "are medicine provided": {
+      "category": "medications",
+      "original_queries": [
+        "What are the medicine provided"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "report summary this": {
+      "category": "clinical_summary",
+      "original_queries": [
+        "What is the summary of this report"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "advise discharge": {
+      "category": "discharge_info",
+      "original_queries": [
+        "what is the discharge advise"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "blood pressure": {
+      "category": "vital_signs",
+      "original_queries": [
+        "blood pressure"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "date discharge patient": {
+      "category": "patient_info",
+      "original_queries": [
+        "discharge date of the patient"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "date": {
+      "category": "dates_timeline",
+      "original_queries": [
+        "date"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "hai kya naam patient": {
+      "category": "patient_info",
+      "original_queries": [
+        "Patient ka naam kya hai?"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "age": {
+      "category": "patient_info",
+      "original_queries": [
+        "age"
+      ],
+      "success_count": 2,
+      "total_count": 2,
+      "confidence": 1.0
+    },
+    "diagnosis": {
+      "category": "medical_condition",
+      "original_queries": [
+        "Diagnosis"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "age gender": {
+      "category": "patient_info",
+      "original_queries": [
+        "age /gender",
+        "AGE / GENDER"
+      ],
+      "success_count": 3,
+      "total_count": 3,
+      "confidence": 1.0
+    },
+    "diagnosis primary": {
+      "category": "medical_condition",
+      "original_queries": [
+        "PRIMARY DIAGNOSIS",
+        "primary diagnosis"
+      ],
+      "success_count": 3,
+      "total_count": 3,
+      "confidence": 1.0
+    },
+    "course hospital": {
+      "category": "clinical_summary",
+      "original_queries": [
+        "HOSPITAL COURSE:",
+        "HOSPITAL COURSE"
+      ],
+      "success_count": 3,
+      "total_count": 3,
+      "confidence": 1.0
+    },
+    "drug": {
+      "category": "medications",
+      "original_queries": [
+        "drug"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "course": {
+      "category": "clinical_summary",
+      "original_queries": [
+        "COURSE"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "conditions": {
+      "category": "medical_condition",
+      "original_queries": [
+        "Conditions"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "diagnosis list": {
+      "category": "medical_condition",
+      "original_queries": [
+        "Diagnosis List"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "follow": {
+      "category": "follow_up",
+      "original_queries": [
+        "FOLLOW-UP"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "name patient": {
+      "category": "patient_info",
+      "original_queries": [
+        "patient name"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "details medication": {
+      "category": "medications",
+      "original_queries": [
+        "medication details"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "date discharge": {
+      "category": "discharge_info",
+      "original_queries": [
+        "discharge date"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "admission date": {
+      "category": "dates_timeline",
+      "original_queries": [
+        "admission date"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "instructions": {
+      "category": "discharge_info",
+      "original_queries": [
+        "instructions",
+        "give the instructions"
+      ],
+      "success_count": 2,
+      "total_count": 2,
+      "confidence": 1.0
+    },
+    "follow instructions": {
+      "category": "discharge_info",
+      "original_queries": [
+        "follow up instructions"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "physician": {
+      "category": "patient_info",
+      "original_queries": [
+        "who is the physician"
+      ],
+      "success_count": 2,
+      "total_count": 2,
+      "confidence": 1.0
+    },
+    "patient report": {
+      "category": "patient_info",
+      "original_queries": [
+        "patient report"
+      ],
+      "success_count": 2,
+      "total_count": 2,
+      "confidence": 1.0
+    },
+    "instructions medical": {
+      "category": "discharge_info",
+      "original_queries": [
+        "medical instructions"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "are diet instruction": {
+      "category": "discharge_info",
+      "original_queries": [
+        "what are the diet instruction"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "food patient": {
+      "category": "patient_info",
+      "original_queries": [
+        "food for the patient"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "are diagnosis primary": {
+      "category": "medical_condition",
+      "original_queries": [
+        "what are the primary diagnosis"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "investigation": {
+      "category": "test_results",
+      "original_queries": [
+        "investigation"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "birth date": {
+      "category": "dates_timeline",
+      "original_queries": [
+        "date of birth"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "birth content date": {
+      "category": "dates_timeline",
+      "original_queries": [
+        "date of birth content"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "condition patient": {
+      "category": "patient_info",
+      "original_queries": [
+        "patient condition"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "provided treatment": {
+      "category": "treatment",
+      "original_queries": [
+        "treatment provided"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    },
+    "are given treatment": {
+      "category": "treatment",
+      "original_queries": [
+        "what are the treatment given"
+      ],
+      "success_count": 1,
+      "total_count": 1,
+      "confidence": 1.0
+    }
+  },
+  "usage_stats": {
+    "patient_info": 21,
+    "medications": 3,
+    "clinical_summary": 5,
+    "discharge_info": 7,
+    "vital_signs": 1,
+    "dates_timeline": 4,
+    "medical_condition": 7,
+    "follow_up": 1,
+    "test_results": 1,
+    "treatment": 2
+  }
+}
