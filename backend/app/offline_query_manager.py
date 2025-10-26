@@ -148,7 +148,7 @@ class OfflineQueryManager:
                     print(f"\n{icon} {section.upper().replace('_', ' ')}:")
                     for key, value in data.items():
                         if value:
-                            # Show complete content for better user understanding
+                            
                             lines = str(value).split('\n')
                             if len(lines) > 3:
                                 print(f"   ✅ {key.replace('_', ' ').title()}:")
@@ -173,7 +173,7 @@ class OfflineQueryManager:
         try:
             print(f"🔍 MCP Processing query: '{query}'")
             
-            # MCP Protocol Implementation
+            # MCP Protocol 
             mcp_request = MCPRequest(method="query/analyze", params={"query": query})
             mcp_result = self._handle_mcp_request(mcp_request)
             
@@ -198,23 +198,23 @@ class OfflineQueryManager:
         entities = self._mcp_extract_entities(query)
         context_relevance = self._mcp_assess_context(query)
         
-        # Generate MCP response
+        # Generateing MCP response
         answer = self._mcp_generate_answer(intent, context_relevance)
         suggestions = self._mcp_generate_suggestions(intent, entities)
         
-        # Get enhanced response from LLM handler
+        
         prompt = f"Context: {self._format_context_for_llm()}\n\nQuestion: {query}"
         
         try:
             llm_response = self.llm_handler.generate(prompt, intent["intent"])
             
             if isinstance(llm_response, dict):
-                # Ensure suggestions is always a list
+                 
                 llm_suggestions = llm_response.get('suggestions', [])
                 if not isinstance(llm_suggestions, list):
                     llm_suggestions = suggestions
                 
-                # Ensure entities is always a list
+                 
                 llm_entities = llm_response.get('medical_entities', [])
                 if not isinstance(llm_entities, list):
                     llm_entities = entities
@@ -240,7 +240,7 @@ class OfflineQueryManager:
             import traceback
             traceback.print_exc()
         
-        # Fallback to basic response
+        # Fallback  
         return {
             "answer": answer,
             "category": intent["intent"],
@@ -261,7 +261,7 @@ class OfflineQueryManager:
         """Enhanced MCP intent detection"""
         query_lower = query.lower()
         
-        # Specific intent detection - ORDER MATTERS! More specific first
+         
         if "hospital" in query_lower and "name" in query_lower:
             return {"intent": "get_hospital_info", "confidence": 0.95, "domain": "medical"}
         elif ("name" in query_lower and ("patient" in query_lower or "what is" in query_lower)) or query_lower.strip() in ["name", "patient name", "what is the name"]:
@@ -327,28 +327,28 @@ class OfflineQueryManager:
         """Enhanced MCP answer generation using advanced LLM handler"""
         intent_name = intent["intent"]
         
-        # Get base content for the intent
+         
         base_content = self._get_base_content(intent_name)
         
         if not base_content or base_content == "Information not found":
             return self._show_available_sections()
         
-        # ALWAYS use LLM handler for proper formatting - this is the key fix
+         
         prompt = f"Context: {base_content}\n\nQuestion: {self._intent_to_question(intent_name)}"
         
         try:
             llm_response = self.llm_handler.generate(prompt, intent_name)
             
-            # Extract the answer from the enhanced response
+ 
             if isinstance(llm_response, dict):
                 formatted_answer = llm_response.get('answer', base_content)
-                # Ensure we return the formatted answer, not raw content
+                 
                 return formatted_answer if formatted_answer != base_content else self._format_raw_content(base_content, intent_name)
             else:
                 return str(llm_response)
         except Exception as e:
             print(f"LLM generation error: {e}")
-            # Fallback to manual formatting if LLM fails
+             
             return self._format_raw_content(base_content, intent_name)
     
     def _select_response_pattern(self, intent_name: str) -> str:
