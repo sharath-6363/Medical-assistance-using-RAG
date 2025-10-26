@@ -2,27 +2,84 @@ import re
 import string
 import random
 import hashlib
-from typing import Dict, List, Optional
+import json
+from typing import Dict, List, Optional, Any
 from difflib import SequenceMatcher
 from collections import defaultdict
+from datetime import datetime
+import numpy as np
+
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModel
+    from sentence_transformers import SentenceTransformer
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    print("⚠️ Transformers not available, using rule-based approach")
+
+try:
+    import spacy
+    nlp = spacy.load("en_core_web_sm")
+    SPACY_AVAILABLE = True
+except (ImportError, OSError):
+    SPACY_AVAILABLE = False
+    print("⚠️ spaCy not available, using basic NLP")
 
 class OfflineLLMHandler:
     def __init__(self):
-        # Advanced response templates
+        # Initialize advanced NLP components
+        self._init_nlp_components()
+        
+        # Medical knowledge base
+        self.medical_knowledge = {
+            'conditions': {
+                'diabetes': ['dm', 'diabetes mellitus', 'diabetic', 'sugar disease'],
+                'hypertension': ['htn', 'high blood pressure', 'high bp', 'elevated bp'],
+                'heart_disease': ['cardiac', 'heart condition', 'coronary', 'chd']
+            },
+            'medications': {
+                'metformin': ['metformin'],
+                'amlodipine': ['amlodipine'],
+                'aspirin': ['aspirin']
+            }
+        }
+        
+        # Enhanced response generation
+        self.response_enhancer = MedicalResponseEnhancer()
+        self.suggestion_generator = SmartSuggestionGenerator()
+        self.instruction_generator = MedicalInstructionGenerator(self.medical_knowledge)
+
+        # OpenAI-like response templates
         self.response_templates = {
             'medical_professional': self._medical_professional_template,
             'patient_friendly': self._patient_friendly_template,
             'technical_detailed': self._technical_detailed_template,
-            'conversational': self._conversational_template
+            'conversational': self._conversational_template,
+            'educational': self._educational_template,
+            'emergency_aware': self._emergency_aware_template
         }
+        
         self.context_awareness = {}
         self.response_history = []
+        self.conversation_context = []
         self.personality_traits = {
-            'empathy_level': 0.8,
-            'technical_depth': 0.7,
-            'conversational_tone': 0.9
+            'empathy_level': 0.9,
+            'technical_depth': 0.8,
+            'conversational_tone': 0.95,
+            'safety_awareness': 1.0,
+            'educational_focus': 0.85
         }
-        # Enhanced medical field patterns with confidence scoring
+        
+        # OpenAI-like capabilities
+        self.capabilities = {
+            'medical_reasoning': True,
+            'contextual_understanding': True,
+            'safety_monitoring': True,
+            'educational_content': True,
+            'personalized_responses': True
+        }
+
+        # Medical field patterns with enhanced accuracy
         self.field_patterns = {
             "patient_name": {
                 "keywords": ["name", "patient name", "full name", "pt name", "patient", "mr", "mrs", "ms", "dr"],
@@ -73,159 +130,461 @@ class OfflineLLMHandler:
                 ],
                 "priority": 9,
                 "confidence_threshold": 0.6
-            },
-            "blood_pressure": {
-                "keywords": ["blood pressure", "bp", "pressure", "systolic", "diastolic"],
-                "patterns": [
-                    r"(?:BP|Blood\s+Pressure)\s*[:\-]?\s*(\d+/\d+)",
-                    r"(\d+/\d+)\s*mmHg",
-                    r"Systolic\s*[:\-]?\s*(\d+)"
-                ],
-                "priority": 7,
-                "confidence_threshold": 0.8
-            },
-            "blood_sugar": {
-                "keywords": ["blood sugar", "glucose", "sugar level", "bs", "fbs", "ppbs"],
-                "patterns": [
-                    r"(?:Blood\s+Sugar|Glucose|FBS|PPBS)\s*[:\-]?\s*(\d+\.?\d*)\s*(?:mg/dl)?",
-                    r"Sugar\s+Level\s*[:\-]?\s*(\d+\.?\d*)",
-                    r"(\d+\.?\d*)\s*mg/dl"
-                ],
-                "priority": 8,
-                "confidence_threshold": 0.7
-            },
-            "admission_date": {
-                "keywords": ["admission", "admitted", "admission date", "when admitted"],
-                "patterns": [
-                    r"(?:Date\s+of\s+)?Admission\s*[:\-]\s*([0-9\-/]+)",
-                    r"Admitted\s+on\s*[:\-]?\s*([0-9\-/]+)",
-                    r"Admission\s+Date\s*[:\-]\s*([0-9\-/]+)"
-                ],
-                "priority": 8,
-                "confidence_threshold": 0.8
-            },
-            "discharge_date": {
-                "keywords": ["discharge", "discharged", "discharge date", "when discharged"],
-                "patterns": [
-                    r"(?:Date\s+of\s+)?Discharge\s*[:\-]\s*([0-9\-/]+)",
-                    r"Discharged\s+on\s*[:\-]?\s*([0-9\-/]+)",
-                    r"Discharge\s+Date\s*[:\-]\s*([0-9\-/]+)"
-                ],
-                "priority": 8,
-                "confidence_threshold": 0.8
-            },
-            "follow_up": {
-                "keywords": ["follow up", "follow-up", "next visit", "appointment", "return"],
-                "patterns": [
-                    r"Follow\s*[-\s]*up\s+(?:after|in)\s+([^.\n]+)",
-                    r"Next\s+visit\s+(?:after|in)\s+([^.\n]+)",
-                    r"Return\s+(?:after|in)\s+([^.\n]+)"
-                ],
-                "priority": 7,
-                "confidence_threshold": 0.6
             }
         }
         
-        # Medical context understanding
+        # Comprehensive medical terminology
         self.medical_synonyms = {
-            "diabetes": ["dm", "diabetes mellitus", "diabetic", "sugar disease"],
-            "hypertension": ["htn", "high blood pressure", "high bp", "elevated bp"],
-            "medication": ["medicine", "drug", "prescription", "pills", "tablets", "meds"],
-            "doctor": ["physician", "consultant", "dr", "attending", "medical officer"],
-            "hospital": ["medical center", "clinic", "healthcare facility", "medical facility"]
+            "diabetes": ["dm", "diabetes mellitus", "diabetic", "sugar disease", "type 2 diabetes", "t2dm"],
+            "hypertension": ["htn", "high blood pressure", "high bp", "elevated bp", "arterial hypertension"],
+            "medication": ["medicine", "drug", "prescription", "pills", "tablets", "meds", "pharmaceuticals"],
+            "doctor": ["physician", "consultant", "dr", "attending", "medical officer", "clinician"],
+            "hospital": ["medical center", "clinic", "healthcare facility", "medical facility", "health center"],
+            "heart_disease": ["cardiac condition", "coronary artery disease", "cad", "heart condition", "cardiovascular disease"],
+            "blood_pressure": ["bp", "arterial pressure", "systolic", "diastolic"],
+            "blood_sugar": ["glucose", "blood glucose", "sugar level", "glycemic level", "hba1c"]
         }
+        
+        # Emergency keywords for safety monitoring
+        self.emergency_keywords = [
+            'chest pain', 'difficulty breathing', 'severe headache', 'stroke symptoms',
+            'heart attack', 'emergency', 'urgent', 'severe pain', 'bleeding',
+            'unconscious', 'seizure', 'allergic reaction'
+        ]
 
-    def generate(self, prompt: str, intent: str = "general") -> str:
-        """Advanced response generation with multiple templates"""
+    def _init_nlp_components(self):
+        """Initialize NLP components if available"""
+        self.semantic_model = None
+        self.medical_ner = None
+        
+        if TRANSFORMERS_AVAILABLE:
+            try:
+                # Use lightweight models for better performance
+                self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+                self.medical_ner = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
+                print("✅ Advanced NLP components loaded")
+            except Exception as e:
+                print(f"⚠️ Could not load advanced NLP: {e}")
+    
+    def generate(self, prompt: str, intent: str = "general") -> Dict[str, Any]:
+        """OpenAI-like response generation with medical intelligence"""
         question = self._extract_question(prompt)
         context = self._extract_context(prompt)
         
         if not context.strip():
-            return "Please upload a medical document first, then I can answer your questions about it."
+            return {
+                'answer': "Please upload a medical document first, then I can answer your questions about it.",
+                'suggestions': ['Upload a medical document', 'Try asking about patient information', 'Ask about medications or diagnosis'],
+                'medical_instructions': [],
+                'safety_alerts': [],
+                'confidence': 0.0
+            }
         
-        # Enhanced question processing
+        # Safety monitoring
+        safety_alerts = self._check_safety_concerns(question, context)
+        
+        # Enhanced question processing with medical context
         processed_question = self._preprocess_question(question)
+        medical_entities = self._extract_medical_entities(question, context)
         
         # Multi-strategy answer generation
         base_answer = self._multi_strategy_answer(processed_question, context)
+        confidence = self._calculate_confidence(base_answer, question, context)
         
-        # Apply advanced templating
-        template_type = self._select_template_type(question, intent)
+        # Apply advanced templating with medical intelligence - force patient_friendly for ChatGPT style
+        template_type = 'patient_friendly'  # Always use patient_friendly for consistent ChatGPT-style responses
         template_func = self.response_templates[template_type]
-        enhanced_answer = template_func(question, base_answer, intent)
+        enhanced_answer = template_func(question, base_answer, intent, medical_entities)
         
-        # Apply personality traits
-        final_answer = self._apply_personality(enhanced_answer, question)
+        # Generate medical instructions and suggestions
+        medical_instructions = self.instruction_generator.generate_instructions(question, base_answer, medical_entities)
+        smart_suggestions = self.suggestion_generator.generate_suggestions(question, base_answer, medical_entities, context)
         
-        # Store in history
-        self.response_history.append({
-            'query': question,
-            'response': final_answer,
-            'template': template_type,
-            'intent': intent
+        # Apply personality and safety
+        final_answer = self._apply_personality_and_safety(enhanced_answer, question, safety_alerts)
+        
+        # Store conversation context
+        self._update_conversation_context(question, final_answer, medical_entities)
+        
+        return {
+            'answer': final_answer,
+            'suggestions': smart_suggestions,
+            'medical_instructions': medical_instructions,
+            'safety_alerts': safety_alerts,
+            'confidence': confidence,
+            'medical_entities': medical_entities,
+            'template_used': template_type
+        }
+    
+    def _check_safety_concerns(self, question: str, context: str) -> List[str]:
+        """Monitor for safety concerns and emergency situations"""
+        alerts = []
+        question_lower = question.lower()
+        context_lower = context.lower()
+        
+        for keyword in self.emergency_keywords:
+            if keyword in question_lower or keyword in context_lower:
+                alerts.append(f"⚠️ If experiencing {keyword}, seek immediate medical attention or call emergency services")
+        
+        # Check for medication concerns
+        if any(word in question_lower for word in ['side effect', 'adverse reaction', 'allergic']):
+            alerts.append("⚠️ For medication concerns or adverse reactions, contact your healthcare provider immediately")
+        
+        return alerts[:2]  # Limit to 2 most important alerts
+    
+    def _extract_medical_entities(self, question: str, context: str) -> List[Dict[str, Any]]:
+        """Extract medical entities using NLP or rule-based approach"""
+        entities = []
+        
+        if self.medical_ner and TRANSFORMERS_AVAILABLE:
+            try:
+                # Use transformer-based NER
+                ner_results = self.medical_ner(question + " " + context[:500])
+                for entity in ner_results:
+                    if entity['score'] > 0.8:
+                        entities.append({
+                            'text': entity['word'],
+                            'label': entity['entity'],
+                            'confidence': entity['score']
+                        })
+            except Exception:
+                pass
+        
+        # Rule-based medical entity extraction
+        entities.extend(self._rule_based_entity_extraction(question, context))
+        
+        return entities
+    
+    def _rule_based_entity_extraction(self, question: str, context: str) -> List[Dict[str, Any]]:
+        """Rule-based medical entity extraction"""
+        entities = []
+        text = (question + " " + context).lower()
+        
+        # Extract conditions
+        for condition, synonyms in self.medical_knowledge['conditions'].items():
+            for synonym in [condition] + synonyms:
+                if synonym in text:
+                    entities.append({
+                        'text': condition,
+                        'label': 'CONDITION',
+                        'confidence': 0.9
+                    })
+                    break
+        
+        # Extract medications
+        for medication, synonyms in self.medical_knowledge['medications'].items():
+            for synonym in synonyms:
+                if synonym in text:
+                    entities.append({
+                        'text': medication,
+                        'label': 'MEDICATION',
+                        'confidence': 0.85
+                    })
+                    break
+        
+        return entities
+    
+    def _calculate_confidence(self, answer: str, question: str, context: str) -> float:
+        """Calculate confidence score for the answer"""
+        if not answer or "not found" in answer.lower():
+            return 0.2
+        
+        confidence = 0.5  # Base confidence
+        
+        # Increase confidence based on answer quality
+        if len(answer) > 50:
+            confidence += 0.2
+        if ':' in answer:  # Structured answer
+            confidence += 0.1
+        if any(word in answer.lower() for word in ['mg', 'tablet', 'daily', 'twice']):
+            confidence += 0.1  # Medical specificity
+        
+        # Decrease confidence for vague answers
+        if any(phrase in answer.lower() for phrase in ['might be', 'possibly', 'unclear']):
+            confidence -= 0.2
+        
+        return min(max(confidence, 0.0), 1.0)
+    
+    def _update_conversation_context(self, question: str, answer: str, entities: List[Dict]):
+        """Update conversation context for better follow-up responses"""
+        self.conversation_context.append({
+            'question': question,
+            'answer': answer,
+            'entities': entities,
+            'timestamp': datetime.now().isoformat()
         })
         
-        return final_answer
+        # Keep only last 5 interactions
+        if len(self.conversation_context) > 5:
+            self.conversation_context = self.conversation_context[-5:]
     
-    def _select_template_type(self, query: str, intent: str) -> str:
-        """Select appropriate response template"""
-        query_lower = query.lower()
-        
-        # Avoid repetitive templates
-        recent_templates = [h['template'] for h in self.response_history[-3:]]
-        
-        if any(word in query_lower for word in ['explain', 'what does', 'help me understand']):
-            return 'patient_friendly' if 'patient_friendly' not in recent_templates else 'conversational'
-        elif any(word in query_lower for word in ['clinical', 'medical', 'professional']):
-            return 'medical_professional' if 'medical_professional' not in recent_templates else 'technical_detailed'
-        elif any(word in query_lower for word in ['details', 'comprehensive', 'complete']):
-            return 'technical_detailed' if 'technical_detailed' not in recent_templates else 'medical_professional'
-        else:
-            return 'conversational'
-    
-    def _medical_professional_template(self, query: str, content: str, intent: str) -> str:
-        """Medical professional response template"""
+    def _medical_professional_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
+        """Medical professional response template with enhanced clinical context"""
         if not content.strip() or "not found" in content.lower():
-            return "The requested clinical data is not documented in the available medical record."
+            return "The requested clinical data is not documented in the available medical record. Consider reviewing additional documentation or contacting the primary care team."
         
         professional_phrases = [
             "Clinical documentation indicates:",
-            "Patient presentation shows:", 
+            "Patient presentation demonstrates:", 
             "Medical assessment reveals:",
-            "Documentation reflects:"
+            "Documentation reflects:",
+            "Clinical findings show:"
         ]
         
         intro = random.choice(professional_phrases)
         
-        if intent == "get_diagnosis":
-            return f"{intro}\n\n**Primary Diagnoses:**\n{content}\n\nRecommend correlation with clinical presentation and diagnostic workup."
-        elif intent == "get_medications":
-            return f"{intro}\n\n**Discharge Pharmacotherapy:**\n{content}\n\nEnsure patient counseling on medication adherence and monitoring."
-        else:
-            return f"{intro}\n\n{content}\n\nClinical correlation advised."
-    
-    def _patient_friendly_template(self, query: str, content: str, intent: str) -> str:
-        """Patient-friendly response template"""
-        if not content.strip() or "not found" in content.lower():
-            return "I don't see that information in your medical records. Let me know if you'd like me to look for something else!"
+        # Add clinical context based on entities
+        clinical_context = self._generate_clinical_context(entities) if entities else ""
         
-        friendly_intros = [
-            "Let me explain what your medical records show:",
-            "Here's what I found in your health information:",
-            "Your medical documents tell us:",
-            "Based on your records, here's what we know:"
+        if intent == "get_diagnosis":
+            response = f"{intro}\n\n**Primary Diagnoses:**\n{content}"
+            if clinical_context:
+                response += f"\n\n**Clinical Considerations:**\n{clinical_context}"
+            response += "\n\n*Recommend correlation with clinical presentation and diagnostic workup.*"
+            return response
+        elif intent == "get_medications":
+            response = f"{intro}\n\n**Discharge Pharmacotherapy:**\n{content}"
+            if clinical_context:
+                response += f"\n\n**Medication Guidance:**\n{clinical_context}"
+            response += "\n\n*Ensure patient counseling on medication adherence and monitoring.*"
+            return response
+        else:
+            response = f"{intro}\n\n{content}"
+            if clinical_context:
+                response += f"\n\n**Additional Context:**\n{clinical_context}"
+            response += "\n\n*Clinical correlation advised.*"
+            return response
+    
+    def _generate_clinical_context(self, entities: List[Dict]) -> str:
+        """Generate clinical context based on extracted entities"""
+        context_parts = []
+        
+        for entity in entities:
+            if entity['label'] == 'CONDITION':
+                condition_info = self.medical_knowledge['conditions'].get(entity['text'])
+                if condition_info:
+                    context_parts.append(f"• {entity['text'].title()}: {condition_info.get('instructions', '')}")
+            elif entity['label'] == 'MEDICATION':
+                med_info = self.medical_knowledge['medications'].get(entity['text'])
+                if med_info:
+                    context_parts.append(f"• {entity['text'].title()}: {med_info.get('purpose', '')}")
+        
+        return '\n'.join(context_parts[:3])  # Limit to 3 most relevant
+    
+    def _patient_friendly_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
+        """ChatGPT-like patient-friendly response template"""
+        if not content.strip() or "not found" in content.lower():
+            return "😊 I don't see that specific information in your medical records. Let me know what else you'd like to know - I'm here to help explain your health information!"
+        
+        # Format content with emojis like ChatGPT
+        formatted_content = self._format_with_medical_emojis(content, intent)
+        
+        if intent == "get_patient_info":
+            return f"👩‍⚕️ **Patient Information**\n\n{formatted_content}\n\n📝 Is there anything specific about the patient details you'd like me to explain?"
+        
+        elif intent == "get_diagnosis":
+            educational_info = self._get_condition_education(content)
+            response = f"🩺 **Medical Conditions**\n\n{formatted_content}"
+            if educational_info:
+                response += f"\n\n📚 **What this means:**\n{educational_info}"
+            response += "\n\n💙 Your healthcare team is managing these conditions. Do you have questions about your diagnosis?"
+            return response
+        
+        elif intent == "get_medications":
+            med_guidance = self._get_medication_guidance(content)
+            response = f"💊 **Your Medications**\n\n{formatted_content}"
+            if med_guidance:
+                response += f"\n\n📝 **Important Notes:**\n{med_guidance}"
+            response += "\n\n✅ Take these exactly as prescribed. Contact your doctor if you have concerns!"
+            return response
+        
+        elif intent == "get_treatment":
+            return f"🏥 **Treatment Provided**\n\n{formatted_content}\n\n😊 This shows the care you received during your hospital stay."
+        
+        elif intent == "get_test_results":
+            return f"🔬 **Test Results**\n\n{formatted_content}\n\n📊 These results help your doctor monitor your health condition."
+        
+        elif intent == "get_hospital_info":
+            return f"🏥 **Hospital Information**\n\n{formatted_content}\n\n📍 This is where the patient received medical care."
+        
+        elif intent == "get_patient_name":
+            return f"👤 **Patient Name**\n\n{formatted_content}\n\n📝 This is the patient's full name."
+        
+        elif intent == "get_patient_age":
+            return f"🎂 **Patient Age**\n\n{formatted_content} years\n\n📝 This is the patient's current age."
+        
+        elif intent == "get_patient_gender":
+            return f"♀️ **Patient Gender**\n\n{formatted_content}\n\n📝 This is the patient's gender."
+        
+        else:
+            return f"📝 **Medical Information**\n\n{formatted_content}\n\n😊 Hope this helps! Feel free to ask more questions."
+    
+    def _generate_educational_content(self, entities: List[Dict]) -> str:
+        """Generate educational content for patients"""
+        content_parts = []
+        
+        for entity in entities:
+            if entity['label'] == 'CONDITION':
+                condition_info = self.medical_knowledge['conditions'].get(entity['text'])
+                if condition_info:
+                    content_parts.append(f"• {entity['text'].title()}: {condition_info.get('instructions', '')}")
+            elif entity['label'] == 'MEDICATION':
+                med_info = self.medical_knowledge['medications'].get(entity['text'])
+                if med_info:
+                    content_parts.append(f"• {entity['text'].title()}: {med_info.get('instructions', '')}")
+        
+        return '\n'.join(content_parts[:3])
+    
+    def _format_with_medical_emojis(self, content: str, intent: str) -> str:
+        """Format content with medical emojis like ChatGPT"""
+        lines = content.split('\n')
+        formatted_lines = []
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Add appropriate emojis based on content
+            if intent == "get_medications":
+                if line.startswith(('1.', '2.', '3.', '4.', '5.')):
+                    formatted_lines.append(f"💊 {line}")
+                else:
+                    formatted_lines.append(line)
+            elif intent == "get_diagnosis":
+                if line.startswith(('1.', '2.', '3.')):
+                    formatted_lines.append(f"🩺 {line}")
+                else:
+                    formatted_lines.append(line)
+            elif intent == "get_treatment":
+                if line.startswith(('1.', '2.', '3.', '4.', '5.')):
+                    formatted_lines.append(f"🏥 {line}")
+                else:
+                    formatted_lines.append(line)
+            elif intent == "get_patient_info":
+                if 'name' in line.lower() or 'patient' in line.lower():
+                    formatted_lines.append(f"👤 {line}")
+                elif 'age' in line.lower():
+                    formatted_lines.append(f"🎂 {line}")
+                elif 'gender' in line.lower() or 'female' in line.lower() or 'male' in line.lower():
+                    formatted_lines.append(f"♀️ {line}" if 'female' in line.lower() else f"♂️ {line}")
+                elif 'admit' in line.lower():
+                    formatted_lines.append(f"🏥 {line}")
+                elif 'discharge' in line.lower():
+                    formatted_lines.append(f"🏠 {line}")
+                else:
+                    formatted_lines.append(line)
+            else:
+                formatted_lines.append(line)
+        
+        return '\n'.join(formatted_lines)
+    
+    def _get_condition_education(self, content: str) -> str:
+        """Get educational information about conditions"""
+        education = []
+        content_lower = content.lower()
+        
+        if 'diabetes' in content_lower:
+            education.append("• **Diabetes**: Your body has trouble controlling blood sugar levels")
+            education.append("• **Management**: Take medications regularly, follow diet, monitor blood sugar")
+        
+        if 'hypertension' in content_lower or 'blood pressure' in content_lower:
+            education.append("• **Hypertension**: High blood pressure that needs regular monitoring")
+            education.append("• **Care**: Take BP medications daily, limit salt, exercise regularly")
+        
+        if 'gastroenteritis' in content_lower:
+            education.append("• **Gastroenteritis**: Stomach infection causing nausea and loose stools")
+            education.append("• **Recovery**: Stay hydrated, eat light foods, avoid outside food")
+        
+        return '\n'.join(education[:4])
+    
+    def _get_medication_guidance(self, content: str) -> str:
+        """Get medication guidance"""
+        guidance = []
+        content_lower = content.lower()
+        
+        if 'metformin' in content_lower:
+            guidance.append("• **Metformin**: Take with food to avoid stomach upset")
+        
+        if 'telmisartan' in content_lower:
+            guidance.append("• **Telmisartan**: Blood pressure medicine - take at same time daily")
+        
+        if 'pantoprazole' in content_lower:
+            guidance.append("• **Pantoprazole**: Stomach protection - take before meals")
+        
+        if 'paracetamol' in content_lower:
+            guidance.append("• **Paracetamol**: For fever/pain only when needed")
+        
+        return '\n'.join(guidance[:4])
+    
+    def _educational_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
+        """Educational template focusing on patient understanding"""
+        if not content.strip():
+            return "Let me help you understand your medical information better. What specific aspect would you like me to explain?"
+        
+        educational_intro = [
+            "Let me break this down for you:",
+            "Here's what you need to know:",
+            "Let me explain this in simple terms:",
+            "Understanding your health information:"
         ]
         
-        intro = random.choice(friendly_intros)
+        intro = random.choice(educational_intro)
         
-        if intent == "get_diagnosis":
-            return f"{intro}\n\n{content}\n\nDon't worry - your healthcare team is working to manage these conditions effectively. Do you have any questions about what this means?"
-        elif intent == "get_medications":
-            return f"{intro}\n\n**Your Medications:**\n{content}\n\nRemember to take these exactly as prescribed. If you have concerns about any medication, please contact your healthcare provider."
-        else:
-            return f"{intro}\n\n{content}\n\nI hope this helps clarify things for you!"
+        # Simplify medical terminology
+        simplified_content = self._simplify_medical_terms(content)
+        
+        response = f"{intro}\n\n{simplified_content}"
+        
+        # Add educational context
+        if entities:
+            educational_tips = self._generate_educational_tips(entities)
+            if educational_tips:
+                response += f"\n\n**Key Points to Remember:**\n{educational_tips}"
+        
+        return response
     
-    def _technical_detailed_template(self, query: str, content: str, intent: str) -> str:
+    def _emergency_aware_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
+        """Emergency-aware template with safety prioritization"""
+        # Check for emergency indicators
+        emergency_indicators = ['chest pain', 'difficulty breathing', 'severe', 'emergency', 'urgent']
+        
+        if any(indicator in query.lower() for indicator in emergency_indicators):
+            return f"🚨 **IMPORTANT**: If you're experiencing emergency symptoms, please call emergency services immediately or go to the nearest emergency room.\n\nRegarding your question: {content}\n\nFor non-emergency concerns, contact your healthcare provider."
+        
+        return self._conversational_template(query, content, intent, entities)
+    
+    def _simplify_medical_terms(self, content: str) -> str:
+        """Simplify medical terminology for patient understanding"""
+        simplifications = {
+            'hypertension': 'high blood pressure',
+            'diabetes mellitus': 'diabetes (high blood sugar)',
+            'myocardial infarction': 'heart attack',
+            'cerebrovascular accident': 'stroke',
+            'pharmacotherapy': 'medication treatment',
+            'therapeutic': 'treatment',
+            'prophylactic': 'preventive'
+        }
+        
+        simplified = content
+        for medical_term, simple_term in simplifications.items():
+            simplified = re.sub(medical_term, simple_term, simplified, flags=re.IGNORECASE)
+        
+        return simplified
+    
+    def _generate_educational_tips(self, entities: List[Dict]) -> str:
+        """Generate educational tips based on entities"""
+        tips = []
+        
+        for entity in entities:
+            if entity['label'] == 'CONDITION':
+                condition_info = self.medical_knowledge['conditions'].get(entity['text'])
+                if condition_info and 'instructions' in condition_info:
+                    tips.append(f"• {condition_info['instructions']}")
+        
+        return '\n'.join(tips[:3])
+    
+    def _technical_detailed_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
         """Technical detailed response template"""
         if not content.strip() or "not found" in content.lower():
             return "Comprehensive analysis of available medical documentation does not contain the requested information parameters."
@@ -245,7 +604,7 @@ class OfflineLLMHandler:
         
         return f"{intro}\n\n{formatted_content}\n\n**Clinical Significance:** This information should be interpreted within the broader clinical context and patient presentation."
     
-    def _conversational_template(self, query: str, content: str, intent: str) -> str:
+    def _conversational_template(self, query: str, content: str, intent: str, entities: List[Dict] = None) -> str:
         """Conversational response template"""
         if not content.strip() or "not found" in content.lower():
             return "Hmm, I don't see that information in the document. What else would you like to know?"
@@ -261,19 +620,41 @@ class OfflineLLMHandler:
         
         return f"{starter}\n\n{content}\n\nAnything else you'd like to know about this?"
     
-    def _apply_personality(self, response: str, query: str) -> str:
-        """Apply personality traits to response"""
-        # Add empathy for sensitive topics
-        if any(word in query.lower() for word in ['pain', 'worried', 'concerned', 'scared']):
-            if self.personality_traits['empathy_level'] > 0.7:
-                response += "\n\nI understand this might be concerning. Please don't hesitate to discuss any worries with your healthcare team."
+    def _apply_personality_and_safety(self, response: str, query: str, safety_alerts: List[str]) -> str:
+        """Apply personality traits and safety measures to response"""
+        # Prepend safety alerts if any
+        if safety_alerts:
+            response = '\n'.join(safety_alerts) + '\n\n' + response
         
-        # Add technical depth when appropriate
-        if "how" in query.lower() or "why" in query.lower():
-            if self.personality_traits['technical_depth'] > 0.6:
-                response += "\n\nWould you like me to explain any of these terms in more detail?"
+        # Add empathy for sensitive topics
+        if any(word in query.lower() for word in ['pain', 'worried', 'concerned', 'scared', 'afraid']):
+            if self.personality_traits['empathy_level'] > 0.8:
+                response += "\n\n💙 I understand this might be concerning. Your feelings are completely normal, and your healthcare team is here to support you."
+        
+        # Add educational offers
+        if any(word in query.lower() for word in ['how', 'why', 'what does', 'explain']):
+            if self.personality_traits['educational_focus'] > 0.7:
+                response += "\n\n📚 Would you like me to explain any medical terms or provide more details about this topic?"
+        
+        # Add follow-up encouragement
+        if self.personality_traits['conversational_tone'] > 0.9:
+            response += "\n\n❓ Feel free to ask if you have any other questions!"
         
         return response
+
+    def _select_template_type(self, query: str, intent: str) -> str:
+        """Select appropriate response template - prioritize patient-friendly for ChatGPT-style responses"""
+        query_lower = query.lower()
+        
+        # Always use patient_friendly template for better ChatGPT-style formatting
+        # This ensures consistent emoji usage and friendly tone
+        if any(word in query_lower for word in ['clinical', 'medical professional', 'doctor']):
+            return 'medical_professional'
+        elif any(word in query_lower for word in ['technical', 'detailed analysis', 'comprehensive']):
+            return 'technical_detailed'
+        else:
+            # Default to patient_friendly for ChatGPT-like responses
+            return 'patient_friendly'
 
     def _preprocess_question(self, question: str) -> str:
         """Preprocess question for better understanding"""
@@ -376,19 +757,6 @@ class OfflineLLMHandler:
             except:
                 return False
         
-        elif field == "blood_pressure":
-            return bool(re.match(r'\d+/\d+', value))
-        
-        elif field == "blood_sugar":
-            try:
-                sugar = float(re.search(r'\d+\.?\d*', value).group())
-                return 50 < sugar < 800
-            except:
-                return False
-        
-        elif field in ["admission_date", "discharge_date"]:
-            return bool(re.match(r'\d+[/-]\d+[/-]\d+', value))
-        
         elif field == "patient_name":
             return len(value.split()) >= 1 and value.replace(' ', '').replace('.', '').isalpha()
         
@@ -426,28 +794,6 @@ class OfflineLLMHandler:
                 if match:
                     return f"Regarding {target}: {match.group(1).strip()}"
         
-        elif q_type == "when":
-            date_patterns = [
-                rf"{re.escape(target)}[^.\n]*?(\d+[/-]\d+[/-]\d+)",
-                rf"(\d+[/-]\d+[/-]\d+)[^.\n]*?{re.escape(target)}"
-            ]
-            
-            for pattern in date_patterns:
-                match = re.search(pattern, context, re.IGNORECASE)
-                if match:
-                    return f"{target.title()} date: {match.group(1)}"
-        
-        elif q_type == "who":
-            name_patterns = [
-                rf"{re.escape(target)}[^.\n]*?(?:Dr\.?\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)",
-                rf"(?:Dr\.?\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)[^.\n]*?{re.escape(target)}"
-            ]
-            
-            for pattern in name_patterns:
-                match = re.search(pattern, context, re.IGNORECASE)
-                if match:
-                    return f"{target.title()}: {match.group(1)}"
-        
         return None
 
     def _contextual_search(self, question: str, context: str) -> Optional[str]:
@@ -466,17 +812,6 @@ class OfflineLLMHandler:
             for field, value in matches:
                 if any(word in field.lower() or word in value.lower() for word in question_lower.split() if len(word) > 2):
                     return f"**{field.strip()}:** {value.strip()}"
-        
-        # Fallback to sentence search
-        question_words = question_lower.split()
-        stop_words = {"what", "is", "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
-        keywords = [word for word in question_words if word not in stop_words and len(word) > 2]
-        
-        if keywords:
-            lines = context.split('\n')
-            for line in lines:
-                if any(keyword in line.lower() for keyword in keywords) and ':' in line:
-                    return line.strip()
         
         return None
 
@@ -532,44 +867,17 @@ class OfflineLLMHandler:
             "age": "Age",
             "gender": "Gender",
             "diagnosis": "Diagnosis",
-            "medications": "Medications",
-            "blood_pressure": "Blood Pressure",
-            "blood_sugar": "Blood Sugar Level",
-            "admission_date": "Admission Date",
-            "discharge_date": "Discharge Date",
-            "follow_up": "Follow-up Instructions"
+            "medications": "Medications"
         }
         
         display_name = field_display_names.get(field, field.replace('_', ' ').title())
         
         # Add appropriate units or context
-        if field == "blood_pressure":
-            value += " mmHg"
-        elif field == "blood_sugar":
-            if not "mg/dl" in value.lower():
-                value += " mg/dl"
-        elif field == "age":
+        if field == "age":
             if not "year" in value.lower():
                 value += " years"
         
         return f"**{display_name}:** {value}"
-
-    def _post_process_answer(self, answer: str) -> str:
-        """Post-process answer for better readability"""
-        if not answer:
-            return "I couldn't find specific information to answer your question in the document."
-        
-        # Clean up formatting
-        answer = re.sub(r'\s+', ' ', answer.strip())
-        
-        # Ensure proper capitalization
-        answer = answer[0].upper() + answer[1:] if answer else answer
-        
-        # Add period if missing
-        if answer and not answer.endswith(('.', '!', '?')):
-            answer += '.'
-        
-        return answer
 
     def _clean_extracted_value(self, value: str) -> str:
         """Enhanced value cleaning"""
@@ -581,10 +889,6 @@ class OfflineLLMHandler:
         
         # Remove trailing punctuation except periods in abbreviations
         value = re.sub(r'[,;:\-]+$', '', value)
-        
-        # Fix common OCR errors
-        value = re.sub(r'\s+([.,;:])', r'\1', value)
-        value = re.sub(r'([.,;:])\s*([A-Z])', r'\1 \2', value)
         
         # Capitalize first letter
         if value:
@@ -607,13 +911,136 @@ class OfflineLLMHandler:
         match = re.search(r"Context\s*\n(.*?)(?:\n\nQuestion:|$)", prompt, re.DOTALL | re.IGNORECASE)
         return match.group(1).strip() if match else prompt
 
-    def extractive_answer(self, query: str, docs: List) -> str:
-        """Enhanced extractive answer generation"""
+    def extractive_answer(self, query: str, docs: List) -> Dict[str, Any]:
+        """Enhanced extractive answer generation with full response structure"""
         if not docs:
-            return "No relevant information found in the document."
+            return {
+                'answer': "No relevant information found in the document.",
+                'suggestions': ['Try uploading a medical document', 'Ask about patient information', 'Check if the document contains the information you need'],
+                'medical_instructions': [],
+                'safety_alerts': [],
+                'confidence': 0.0
+            }
         
         # Combine document content
         combined_text = " ".join([doc.page_content for doc in docs])
         
-        # Use enhanced extraction
+        # Use enhanced generation
         return self.generate(f"Context: {combined_text}\n\nQuestion: {query}")
+
+
+class MedicalResponseEnhancer:
+    """Enhances responses with medical intelligence"""
+    
+    def __init__(self):
+        self.medical_patterns = {
+            'dosage': r'(\d+(?:\.\d+)?\s*(?:mg|g|ml|units?))',
+            'frequency': r'(once|twice|three times|\d+\s*times?)\s*(?:daily|per day|a day)',
+            'duration': r'for\s+(\d+\s*(?:days?|weeks?|months?))',
+        }
+    
+    def enhance_medication_info(self, text: str) -> str:
+        """Enhance medication information with structured format"""
+        enhanced_lines = []
+        
+        for line in text.split('\n'):
+            if any(word in line.lower() for word in ['tablet', 'mg', 'daily', 'twice']):
+                # Extract dosage, frequency, duration
+                dosage = re.search(self.medical_patterns['dosage'], line, re.IGNORECASE)
+                frequency = re.search(self.medical_patterns['frequency'], line, re.IGNORECASE)
+                
+                enhanced_line = line
+                if dosage and frequency:
+                    enhanced_line += f" [{dosage.group(1)} {frequency.group(1)}]"
+                
+                enhanced_lines.append(enhanced_line)
+            else:
+                enhanced_lines.append(line)
+        
+        return '\n'.join(enhanced_lines)
+
+
+class SmartSuggestionGenerator:
+    """Generates intelligent follow-up suggestions"""
+    
+    def generate_suggestions(self, query: str, answer: str, entities: List[Dict], context: str) -> List[str]:
+        """Generate contextual suggestions based on query and answer"""
+        suggestions = []
+        query_lower = query.lower()
+        answer_lower = answer.lower()
+        
+        # Context-aware suggestions
+        if 'diagnosis' in query_lower:
+            suggestions.extend([
+                "💊 What medications are prescribed for this condition?",
+                "🏥 What treatment was provided during the hospital stay?",
+                "📋 What are the discharge care instructions?",
+                "🔬 What test results support this diagnosis?"
+            ])
+        elif 'medication' in query_lower:
+            suggestions.extend([
+                "⏰ What are the exact dosing schedules?",
+                "⚠️ What side effects should I watch for?",
+                "🍽️ Should these be taken with or without food?",
+                "📊 How will the effectiveness be monitored?"
+            ])
+        elif 'test' in query_lower or 'result' in query_lower:
+            suggestions.extend([
+                "📈 Are these results within normal ranges?",
+                "🔍 What do these findings indicate for my health?",
+                "🔄 Will these tests need to be repeated?",
+                "💡 How do these results affect my treatment plan?"
+            ])
+        else:
+            # General medical suggestions
+            suggestions.extend([
+                "🩺 Can you explain the main diagnosis?",
+                "💊 What medications should I continue at home?",
+                "📋 What are the most important discharge instructions?",
+                "📅 When should I schedule follow-up appointments?"
+            ])
+        
+        # Entity-based suggestions
+        if entities and isinstance(entities, list):
+            for entity in entities:
+                if isinstance(entity, dict) and entity.get('label') == 'CONDITION':
+                    condition = entity.get('text', '')
+                    if condition == 'diabetes':
+                        suggestions.append("🍯 What should my target blood sugar levels be?")
+                    elif condition == 'hypertension':
+                        suggestions.append("🩸 How often should I monitor my blood pressure?")
+        
+        # Safety-based suggestions
+        if any(word in answer_lower for word in ['pain', 'symptoms', 'side effects']):
+            suggestions.append("🚨 What symptoms require immediate medical attention?")
+        
+        # Remove duplicates and return top 4
+        unique_suggestions = list(dict.fromkeys(suggestions))
+        return unique_suggestions[:4]
+
+
+class MedicalInstructionGenerator:
+    """Generates medical instructions and care guidance"""
+    
+    def __init__(self, medical_knowledge: Dict):
+        self.medical_knowledge = medical_knowledge
+    
+    def generate_instructions(self, query: str, answer: str, entities: List[Dict]) -> List[str]:
+        """Generate relevant medical instructions"""
+        instructions = []
+        
+        # General medical instructions based on query type
+        if 'discharge' in query.lower():
+            instructions.extend([
+                "📅 Schedule follow-up appointments as recommended",
+                "💊 Take all medications exactly as prescribed",
+                "🚨 Contact your healthcare provider if symptoms worsen"
+            ])
+        elif 'medication' in query.lower():
+            instructions.extend([
+                "💊 Take medications exactly as prescribed",
+                "⏰ Take at the same time each day",
+                "🚨 Contact doctor if you experience side effects"
+            ])
+        
+        return instructions[:4]  # Limit to 4 most relevant instructions

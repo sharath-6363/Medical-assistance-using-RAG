@@ -203,10 +203,14 @@ async def query_document(payload: dict):
             "confidence": result.get("confidence", 0.8),
             "category": result.get("category", "General"),
             "suggestions": result.get("suggestions", []),
+            "medical_instructions": result.get("medical_instructions", []),
+            "safety_alerts": result.get("safety_alerts", []),
             "metadata": result.get("mcp_metadata", {}),
             "entities": result.get("entities", []),
             "extracted_sections": len(result.get("extracted_data", {})),
-            "data_quality": "complete" if result.get("extracted_data") else "limited"
+            "data_quality": "complete" if result.get("extracted_data") else "limited",
+            "response_type": "enhanced_medical_ai",
+            "template_used": result.get("mcp_metadata", {}).get("template_used", "conversational")
         }
     except Exception as e:
         print(f"Query error: {e}")
