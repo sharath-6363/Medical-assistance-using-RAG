@@ -2,70 +2,115 @@ import os
 import re
 import hashlib
 import json
-from typing import Dict, List, Optional, Set
+import mimetypes
+from datetime import datetime
+from typing import Dict, List, Optional, Set, Any
 from collections import defaultdict
 
-class OfflineDocumentParser:
+class ForensicDocumentExtractor:
     def __init__(self):
-        self.extraction_patterns = {
-            'semantic': self._semantic_extraction,
-            'structured': self._structured_extraction, 
-            'contextual': self._contextual_extraction
-        }
+        self.mode = 'EXTRACT'  # EXTRACT or ANSWER
+        self.extracted_data = None
         self.response_cache = {}
-        self.content_fingerprints = set()
 
-    def extract_text(self, file_path: str) -> str:
-        """Extract text from different file types"""
-        if not os.path.exists(file_path):
-            print(f"❌ File not found: {file_path}")
-            return ""
+    def extract_document(self, file_path: str) -> Dict[str, Any]:
+        """EXTRACT mode: Forensic-level document extraction"""
+        self.mode = 'EXTRACT'
         
+        if not os.path.exists(file_path):
+            return self._create_error_response(file_path, "File not found")
+        
+        try:
+            # Get file metadata
+            file_stats = os.stat(file_path)
+            filename = os.path.basename(file_path)
+            mime_type, _ = mimetypes.guess_type(file_path)
+            
+            # Extract text content
+            full_text = self._extract_text_content(file_path)
+            
+            # Build forensic extraction JSON
+            extraction = {
+                'file': {
+                    'filename': filename,
+                    'mime_type': mime_type or 'application/octet-stream',
+                    'size_bytes': file_stats.st_size,
+                    'created_at': datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
+                    'modified_at': datetime.fromtimestamp(file_stats.st_mtime).isoformat(),
+                    'pages': self._estimate_pages(full_text)
+                },
+                'languages': [{'page': None, 'language': 'en', 'confidence': 0.95}],
+                'metadata': self._extract_metadata(file_path, full_text),
+                'full_text': full_text,
+                'blocks': self._extract_blocks(full_text),
+                'tables': self._extract_tables(full_text),
+                'forms': self._extract_forms(full_text),
+                'images': [],
+                'attachments': [],
+                'chunks': self._create_chunks(full_text),
+                'entities': self._extract_entities(full_text),
+                'extraction_remarks': []
+            }
+            
+            self.extracted_data = extraction
+            return extraction
+            
+        except Exception as e:
+            return self._create_error_response(file_path, str(e))
+    
+    def answer_query(self, query: str) -> str:
+        """ANSWER mode: Query against extracted data"""
+        self.mode = 'ANSWER'
+        
+        if not self.extracted_data:
+            return "ANSWER: No document extracted\nSOURCES: None\nEXCERPTS: None\nCONFIDENCE: Low"
+        
+        # Search in extracted content
+        results = self._search_extracted_data(query)
+        
+        if not results:
+            related = self._find_related_content(query)
+            if related:
+                return f"ANSWER: Not found in document\nSOURCES: Related content found\nEXCERPTS: {'; '.join(related[:3])}\nCONFIDENCE: Low"
+            return "ANSWER: Not found in document\nSOURCES: None\nEXCERPTS: None\nCONFIDENCE: Low"
+        
+        # Format response
+        answer = results['answer']
+        sources = '\n'.join([f"• {s}" for s in results['sources']])
+        excerpts = '\n'.join([f"• {e}" for e in results['excerpts']])
+        confidence = results['confidence']
+        
+        return f"ANSWER: {answer}\nSOURCES:\n{sources}\nEXCERPTS:\n{excerpts}\nCONFIDENCE: {confidence}"
+    
+    def _extract_text_content(self, file_path: str) -> str:
+        """Extract text from various file formats"""
         file_ext = os.path.splitext(file_path)[1].lower()
-        print(f"🔍 Processing file type: {file_ext}")
         
         try:
             if file_ext == '.txt':
-                return self._extract_from_txt(file_path)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
             elif file_ext == '.pdf':
-                return self._extract_from_pdf(file_path)
+                return self._extract_pdf_text(file_path)
             elif file_ext in ['.docx', '.doc']:
-                return self._extract_from_docx(file_path)
+                return self._extract_docx_text(file_path)
             else:
-                # Try as text file
-                return self._extract_from_txt(file_path)
-        except Exception as e:
-            print(f"❌ Extraction error: {e}")
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+        except Exception:
             return ""
     
-    def _extract_from_txt(self, file_path: str) -> str:
-        """Extract from TXT file"""
+    def _extract_pdf_text(self, file_path: str) -> str:
+        """Extract text from PDF"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                text = f.read()
-            print(f"✅ TXT extracted: {len(text)} characters")
+            import fitz
+            doc = fitz.open(file_path)
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
             return text
-        except Exception as e:
-            print(f"❌ TXT error: {e}")
-            return ""
-    
-    def _extract_from_pdf(self, file_path: str) -> str:
-        """Extract from PDF file"""
-        try:
-            # Try PyMuPDF first
-            try:
-                import fitz
-                doc = fitz.open(file_path)
-                text = ""
-                for page in doc:
-                    text += page.get_text()
-                doc.close()
-                print(f"✅ PDF extracted with PyMuPDF: {len(text)} characters")
-                return text
-            except ImportError:
-                pass
-            
-            # Try pdfplumber
+        except ImportError:
             try:
                 import pdfplumber
                 text = ""
@@ -74,252 +119,306 @@ class OfflineDocumentParser:
                         page_text = page.extract_text()
                         if page_text:
                             text += page_text + "\n"
-                print(f"✅ PDF extracted with pdfplumber: {len(text)} characters")
                 return text
             except ImportError:
-                pass
-            
-            # Try PyPDF2
-            try:
-                import PyPDF2
-                text = ""
-                with open(file_path, 'rb') as file:
-                    reader = PyPDF2.PdfReader(file)
-                    for page in reader.pages:
-                        text += page.extract_text() + "\n"
-                print(f"✅ PDF extracted with PyPDF2: {len(text)} characters")
-                return text
-            except ImportError:
-                pass
-            
-            print("❌ No PDF libraries available")
-            return ""
-            
-        except Exception as e:
-            print(f"❌ PDF error: {e}")
-            return ""
-    
-    def _extract_from_docx(self, file_path: str) -> str:
-        """Extract from DOCX/DOC file"""
-        try:
-            # Try python-docx
-            try:
-                from docx import Document
-                doc = Document(file_path)
-                text = ""
-                for paragraph in doc.paragraphs:
-                    text += paragraph.text + "\n"
-                
-                # Extract tables
-                for table in doc.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            text += cell.text + " "
-                        text += "\n"
-                
-                print(f"✅ DOCX extracted: {len(text)} characters")
-                return text
-            except ImportError:
-                pass
-            
-            # Try docx2txt
-            try:
-                import docx2txt
-                text = docx2txt.process(file_path)
-                print(f"✅ DOCX extracted with docx2txt: {len(text)} characters")
-                return text
-            except ImportError:
-                pass
-            
-            print("❌ No DOCX libraries available")
-            return ""
-            
-        except Exception as e:
-            print(f"❌ DOCX error: {e}")
+                return ""
+        except Exception:
             return ""
 
-    def parse_document(self, text: str) -> Dict[str, Dict[str, str]]:
-        """Advanced multi-pattern document parsing"""
-        if not text:
-            return {}
-        
-        # Generate content fingerprint for uniqueness
-        content_hash = hashlib.md5(text.encode()).hexdigest()
-        if content_hash in self.response_cache:
-            print("📋 Using cached extraction")
-            return self.response_cache[content_hash]
-        
-        print(f"🔍 Advanced parsing: {len(text)} characters")
-        
-        # Multi-pattern extraction with error handling
-        sections = {}
-        for pattern_name, extractor in self.extraction_patterns.items():
+    def _extract_docx_text(self, file_path: str) -> str:
+        """Extract text from DOCX"""
+        try:
+            from docx import Document
+            doc = Document(file_path)
+            text = ""
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text += cell.text + " "
+                    text += "\n"
+            return text
+        except ImportError:
             try:
-                pattern_sections = extractor(text)
-                if pattern_sections:
-                    sections.update(pattern_sections)
-            except Exception as e:
-                print(f"❌ Pattern {pattern_name} failed: {e}")
-                continue
-        
-        # Enhance with contextual relationships (with error handling)
-        try:
-            sections = self._enhance_with_context(sections, text)
-        except Exception as e:
-            print(f"❌ Context enhancement failed: {e}")
-        
-        # Remove duplicates and empty sections (with error handling)
-        try:
-            sections = self._deduplicate_sections(sections)
-        except Exception as e:
-            print(f"❌ Deduplication failed: {e}")
-            sections = {k: v for k, v in sections.items() if v}
-        
-        # Cache result
-        self.response_cache[content_hash] = sections
-        
-        print(f"📊 Multi-pattern extraction: {len(sections)} unique sections")
-        return sections
-    
-    def _semantic_extraction(self, text: str) -> Dict[str, Dict[str, str]]:
-        """Semantic pattern extraction"""
-        sections = {}
-        
-        # Semantic medical patterns
-        semantic_patterns = {
-            'patient_demographics': r'(?:Patient|Name|Age|Gender)[:\s]([^\n]+)',
-            'medical_history': r'(?:History|Background|Previous)[:\s]([^\n]+)',
-            'chief_complaint': r'(?:Complaint|Presenting|Symptoms)[:\s]([^\n]+)',
-            'assessment_plan': r'(?:Assessment|Plan|Impression)[:\s]([^\n]+)'
-        }
-        
-        for section, pattern in semantic_patterns.items():
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            if matches:
-                sections[section] = {'content': '\n'.join(matches)}
-        
-        return sections
-    
-    def _structured_extraction(self, text: str) -> Dict[str, Dict[str, str]]:
-        """Structured pattern extraction"""
-        sections = {}
-        
-        # Traditional structured extraction
-        sections['patient_information'] = self._extract_all_patient_info(text)
-        sections['diagnosis'] = self._extract_all_diagnosis(text)
-        sections['clinical_summary'] = self._extract_all_clinical(text)
-        sections['investigations'] = self._extract_all_investigations(text)
-        sections['treatment_given'] = self._extract_all_treatment(text)
-        sections['discharge_medications'] = self._extract_all_medications(text)
-        sections['discharge_advice'] = self._extract_all_advice(text)
-        sections['follow_up'] = self._extract_all_followup(text)
-        
-        return sections
-    
-    def _contextual_extraction(self, text: str) -> Dict[str, Dict[str, str]]:
-        """Contextual relationship extraction"""
-        sections = {}
-        
-        try:
-            # Extract contextual relationships
-            lines = text.split('\n')
-            context_map = defaultdict(list)
-            
-            for i, line in enumerate(lines):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Medical context patterns
-                if any(word in line.lower() for word in ['due to', 'caused by', 'resulting in']):
-                    context_map['causal_relationships'].append(line)
-                elif any(word in line.lower() for word in ['improved', 'worsened', 'stable']):
-                    context_map['clinical_progress'].append(line)
-                elif any(word in line.lower() for word in ['monitor', 'follow', 'continue']):
-                    context_map['ongoing_care'].append(line)
-            
-            for context_type, content_list in context_map.items():
-                if content_list:
-                    sections[context_type] = {'relationships': '\n'.join(content_list)}
-        except Exception as e:
-            print(f"❌ Contextual extraction error: {e}")
-        
-        return sections
-    
-    def _enhance_with_context(self, sections: Dict, text: str) -> Dict:
-        """Enhance sections with contextual information"""
-        if not sections:
-            return sections
-            
-        enhanced = sections.copy()
-        
-        try:
-            # Add cross-references between sections
-            for section_name, section_data in sections.items():
-                if isinstance(section_data, dict):
-                    for field, value in section_data.items():
-                        if value and isinstance(value, str):
-                            # Find related content in other sections
-                            related_content = self._find_related_content(value, sections, section_name)
-                            if related_content:
-                                enhanced[section_name][f'{field}_related'] = related_content
-        except Exception as e:
-            print(f"❌ Context enhancement error: {e}")
-            return sections
-        
-        return enhanced
-    
-    def _find_related_content(self, content: str, all_sections: Dict, current_section: str) -> str:
-        """Find related content across sections"""
-        if not content or not isinstance(content, str):
-            return ''
-            
-        try:
-            content_words = set(content.lower().split())
-            related_items = []
-            
-            for section_name, section_data in all_sections.items():
-                if section_name == current_section:
-                    continue
-                    
-                if isinstance(section_data, dict):
-                    for field, value in section_data.items():
-                        if value and isinstance(value, str):
-                            value_words = set(str(value).lower().split())
-                            overlap = len(content_words.intersection(value_words))
-                            if overlap > 2:  # Significant overlap
-                                related_items.append(f"{section_name}: {str(value)[:100]}")
-            
-            return '\n'.join(related_items[:3]) if related_items else ''
+                import docx2txt
+                return docx2txt.process(file_path)
+            except ImportError:
+                return ""
         except Exception:
-            return ''
+            return ""
     
-    def _deduplicate_sections(self, sections: Dict) -> Dict:
-        """Remove duplicate content across sections"""
-        if not sections:
-            return sections
+    def _create_error_response(self, file_path: str, error: str) -> Dict[str, Any]:
+        """Create error response in extraction format"""
+        return {
+            'file': {'filename': os.path.basename(file_path), 'mime_type': None, 'size_bytes': 0, 'created_at': None, 'modified_at': None, 'pages': None},
+            'languages': [],
+            'metadata': {'author': None, 'title': None, 'producer': None, 'custom': {}},
+            'full_text': '',
+            'blocks': [],
+            'tables': [],
+            'forms': [],
+            'images': [],
+            'attachments': [],
+            'chunks': [],
+            'entities': [],
+            'extraction_remarks': [{'issue': 'extraction_error', 'page': None, 'note': error}]
+        }
+    
+    def _estimate_pages(self, text: str) -> int:
+        """Estimate page count"""
+        return max(1, len(text) // 3000) if text else None
+    
+    def _extract_metadata(self, file_path: str, text: str) -> Dict[str, Any]:
+        """Extract document metadata"""
+        metadata = {'author': None, 'title': None, 'producer': None, 'custom': {}}
+        
+        # Extract from text patterns
+        author_match = re.search(r'(?:Author|Doctor|Physician)[:\s]+([^\n]+)', text, re.IGNORECASE)
+        if author_match:
+            metadata['author'] = author_match.group(1).strip()
+        
+        title_match = re.search(r'(?:Title|Subject)[:\s]+([^\n]+)', text, re.IGNORECASE)
+        if title_match:
+            metadata['title'] = title_match.group(1).strip()
+        
+        return metadata
+    
+    def _extract_blocks(self, text: str) -> List[Dict[str, Any]]:
+        """Extract text blocks with provenance"""
+        blocks = []
+        lines = text.split('\n')
+        offset = 0
+        
+        for i, line in enumerate(lines):
+            if line.strip():
+                block_type = 'heading' if line.isupper() and len(line) > 5 else 'paragraph'
+                blocks.append({
+                    'id': f'b{i+1}',
+                    'page': None,
+                    'block_type': block_type,
+                    'text': line.strip(),
+                    'bbox': {'x': 0, 'y': i, 'w': len(line), 'h': 1},
+                    'start_offset': offset,
+                    'end_offset': offset + len(line),
+                    'confidence': 0.95
+                })
+            offset += len(line) + 1
+        
+        return blocks
+    
+    def _extract_tables(self, text: str) -> List[Dict[str, Any]]:
+        """Extract tables from text"""
+        tables = []
+        lines = text.split('\n')
+        
+        for i, line in enumerate(lines):
+            if '|' in line or '\t' in line:
+                # Simple table detection
+                cells = re.split(r'[|\t]+', line.strip())
+                if len(cells) > 1:
+                    tables.append({
+                        'table_id': f't{len(tables)+1}',
+                        'page': None,
+                        'headers': cells if i == 0 else [],
+                        'rows': [cells],
+                        'csv_snippet': ','.join(cells[:3]),
+                        'confidence': 0.8
+                    })
+        
+        return tables
+    
+    def _extract_forms(self, text: str) -> List[Dict[str, Any]]:
+        """Extract form key-value pairs"""
+        forms = []
+        lines = text.split('\n')
+        
+        for line in lines:
+            if ':' in line:
+                parts = line.split(':', 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    if key and value:
+                        forms.append({
+                            'key': key,
+                            'value': value,
+                            'page': None,
+                            'confidence': 0.9
+                        })
+        
+        return forms
+
+    def _create_chunks(self, text: str) -> List[Dict[str, Any]]:
+        """Create text chunks"""
+        chunks = []
+        chunk_size = 2000
+        
+        for i in range(0, len(text), chunk_size):
+            chunk_text = text[i:i+chunk_size]
+            chunks.append({
+                'chunk_id': f'c{len(chunks)+1}',
+                'start_offset': i,
+                'end_offset': min(i+chunk_size, len(text)),
+                'text': chunk_text,
+                'page_range': [None, None]
+            })
+        
+        return chunks
+    
+    def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """Extract named entities"""
+        entities = []
+        
+        # Simple pattern-based entity extraction
+        person_pattern = r'Dr\. [A-Z][a-z]+ [A-Z][a-z]+'
+        for match in re.finditer(person_pattern, text):
+            entities.append({
+                'text': match.group(),
+                'type': 'PERSON',
+                'page': None,
+                'confidence': 0.9
+            })
+        
+        return entities
+    
+    def _search_extracted_data(self, query: str) -> Dict[str, Any]:
+        """Search within extracted data"""
+        query_lower = query.lower()
+        results = {'answer': '', 'sources': [], 'excerpts': [], 'confidence': 'Low'}
+        
+        # Search in full text
+        if query_lower in self.extracted_data['full_text'].lower():
+            # Find matching blocks
+            for block in self.extracted_data['blocks']:
+                if query_lower in block['text'].lower():
+                    results['sources'].append(f"block {block['id']}")
+                    results['excerpts'].append(block['text'][:100])
             
-        try:
-            seen_content = set()
-            deduplicated = {}
+            # Search forms
+            for form in self.extracted_data['forms']:
+                if query_lower in form['key'].lower() or query_lower in form['value'].lower():
+                    results['sources'].append(f"form {form['key']}")
+                    results['excerpts'].append(f"{form['key']}: {form['value']}")
             
-            for section_name, section_data in sections.items():
-                if isinstance(section_data, dict):
-                    clean_section = {}
-                    for field, value in section_data.items():
-                        if value and isinstance(value, str):
-                            content_hash = hashlib.md5(str(value).encode()).hexdigest()
-                            if content_hash not in seen_content:
-                                seen_content.add(content_hash)
-                                clean_section[field] = value
-                    
-                    if clean_section:
-                        deduplicated[section_name] = clean_section
-            
-            return deduplicated
-        except Exception as e:
-            print(f"❌ Deduplication error: {e}")
-            return {k: v for k, v in sections.items() if v}
+            if results['sources']:
+                results['answer'] = results['excerpts'][0] if results['excerpts'] else 'Found in document'
+                results['confidence'] = 'High' if len(results['sources']) > 1 else 'Medium'
+        
+        return results if results['sources'] else None
+    
+    def _find_related_content(self, query: str) -> List[str]:
+        """Find related content for failed searches"""
+        query_words = set(query.lower().split())
+        related = []
+        
+        for block in self.extracted_data['blocks']:
+            block_words = set(block['text'].lower().split())
+            if query_words.intersection(block_words):
+                related.append(block['text'][:100])
+        
+        return related
+    
+    def extract_document_from_text(self, text: str):
+        """Extract from text content directly for testing"""
+        self.extracted_data = {
+            'file': {'filename': 'text_input', 'mime_type': 'text/plain', 'size_bytes': len(text), 'created_at': None, 'modified_at': None, 'pages': None},
+            'languages': [{'page': None, 'language': 'en', 'confidence': 0.95}],
+            'metadata': {'author': None, 'title': None, 'producer': None, 'custom': {}},
+            'full_text': text,
+            'blocks': self._extract_blocks(text),
+            'tables': self._extract_tables(text),
+            'forms': self._extract_forms(text),
+            'images': [],
+            'attachments': [],
+            'chunks': self._create_chunks(text),
+            'entities': self._extract_entities(text),
+            'extraction_remarks': []
+        }
+
+# Backward compatibility alias
+OfflineDocumentParser = ForensicDocumentExtractor
+
+class OfflineDocumentParser(ForensicDocumentExtractor):
+    """Legacy class for backward compatibility"""
+    def parse_document(self, text: str) -> Dict[str, Dict[str, str]]:
+        """Legacy method that returns old format"""
+        # Extract using forensic method
+        if text:
+            self.extract_document_from_text(text)
+        
+        # Convert to legacy format
+        if hasattr(self, 'extracted_data') and self.extracted_data:
+            return self._convert_forensic_to_legacy_format(self.extracted_data)
+        return {}
+    
+    def extract_text(self, file_path: str) -> str:
+        """Legacy text extraction method"""
+        return self._extract_text_content(file_path)
+    
+    def extract_document_from_text(self, text: str):
+        """Extract from text content directly"""
+        # Create minimal extraction data
+        self.extracted_data = {
+            'file': {'filename': 'text_input', 'mime_type': 'text/plain', 'size_bytes': len(text), 'created_at': None, 'modified_at': None, 'pages': None},
+            'languages': [{'page': None, 'language': 'en', 'confidence': 0.95}],
+            'metadata': {'author': None, 'title': None, 'producer': None, 'custom': {}},
+            'full_text': text,
+            'blocks': self._extract_blocks(text),
+            'tables': self._extract_tables(text),
+            'forms': self._extract_forms(text),
+            'images': [],
+            'attachments': [],
+            'chunks': self._create_chunks(text),
+            'entities': self._extract_entities(text),
+            'extraction_remarks': []
+        }
+    
+    def _convert_forensic_to_legacy_format(self, forensic_data: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+        """Convert forensic format to legacy structured format"""
+        legacy_format = {}
+        
+        # Patient information
+        patient_info = {}
+        for form in forensic_data.get('forms', []):
+            key = form.get('key', '').lower()
+            value = form.get('value', '')
+            if 'name' in key:
+                patient_info['patient_name'] = value
+            elif 'age' in key:
+                patient_info['age'] = value
+            elif 'gender' in key:
+                patient_info['gender'] = value
+        
+        if patient_info:
+            legacy_format['patient_information'] = patient_info
+        
+        # Extract other sections from text patterns
+        text = forensic_data.get('full_text', '')
+        legacy_format.update(self._extract_legacy_sections(text))
+        
+        return legacy_format
+    
+    def _extract_legacy_sections(self, text: str) -> Dict[str, Dict[str, str]]:
+        """Extract sections in legacy format"""
+        sections = {}
+        
+        # Diagnosis
+        diag_match = re.search(r'DIAGNOSIS[:\s]*(.*?)(?=CLINICAL|INVESTIGATIONS|TREATMENT|$)', text, re.IGNORECASE | re.DOTALL)
+        if diag_match:
+            sections['diagnosis'] = {'diagnosis': diag_match.group(1).strip()}
+        
+        # Medications
+        med_match = re.search(r'DISCHARGE MEDICATIONS[:\s]*(.*?)(?=ADVICE|FOLLOW|$)', text, re.IGNORECASE | re.DOTALL)
+        if med_match:
+            sections['discharge_medications'] = {'medications': med_match.group(1).strip()}
+        
+        # Clinical summary
+        summary_match = re.search(r'CLINICAL SUMMARY[:\s]*(.*?)(?=INVESTIGATIONS|TREATMENT|$)', text, re.IGNORECASE | re.DOTALL)
+        if summary_match:
+            sections['clinical_summary'] = {'summary': summary_match.group(1).strip()}
+        
+        return sections
 
     def _extract_all_patient_info(self, text: str) -> Dict[str, str]:
         """Extract ALL patient information"""

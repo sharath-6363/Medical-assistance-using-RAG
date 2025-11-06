@@ -21,3 +21,6 @@ aiofiles==23.2.1
 
 # Development
 python-dotenv==1.0.0
+
+# MCP QueryHandler Protocol Support
+# (Built-in Python modules: mimetypes, datetime, json, hashlib, re)

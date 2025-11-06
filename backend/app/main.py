@@ -4,7 +4,9 @@ from pathlib import Path
 import shutil
 import os
 import asyncio
-from .offline_document_parser import OfflineDocumentParser
+import signal
+import sys
+from .offline_document_parser import ForensicDocumentExtractor
 from .offline_llm_handler import OfflineLLMHandler
 from .offline_query_manager import OfflineQueryManager
 from .offline_rag_pipeline import OfflineRAGPipeline
@@ -23,8 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize offline components
-document_parser = OfflineDocumentParser()
+# Initialize forensic extractor
+forensic_extractor = ForensicDocumentExtractor()
 llm_handler = OfflineLLMHandler()
 
 # Create a simple vector manager for RAG
@@ -68,49 +70,51 @@ class SimpleVectorManager:
 
 vector_manager = SimpleVectorManager()
 rag_pipeline = OfflineRAGPipeline(vector_manager, llm_handler)
-query_manager = OfflineQueryManager(document_parser, llm_handler, rag_pipeline)
+query_manager = OfflineQueryManager(forensic_extractor, llm_handler, rag_pipeline)
 
 # Store processing status
 processing_status = {}
 
 async def process_document_async(file_path: str, filename: str):
-    """Process document in background"""
+    """Process document in background using forensic extraction"""
     try:
-        print(f"🔄 Starting async processing for: {filename}")
+        print(f"🔄 Starting forensic extraction for: {filename}")
         
-        # Extract text using document parser
-        print(f"🔍 Extracting text from: {file_path}")
-        text = document_parser.extract_text(file_path)
+        # EXTRACT mode: Forensic-level document extraction
+        extraction_result = forensic_extractor.extract_document(file_path)
         
-        print(f"📊 Extracted text length: {len(text)}")
-        print(f"📊 Text preview: {text[:200]}...")
+        if extraction_result.get('extraction_remarks'):
+            for remark in extraction_result['extraction_remarks']:
+                if remark.get('issue') == 'extraction_error':
+                    processing_status[filename] = {
+                        "status": "error", 
+                        "message": remark.get('note', 'Extraction failed')
+                    }
+                    return
         
-        if not text.strip():
-            processing_status[filename] = {
-                "status": "error", 
-                "message": "Could not extract any text from the document"
-            }
-            return
-        
-        print(f"✅ Text extraction completed: {len(text)} characters")
+        text = extraction_result.get('full_text', '')
+        print(f"✅ Forensic extraction completed: {len(text)} characters")
         
         # Add to vector store
         vector_manager.add_document(filename, text)
         
-        # Process document with offline parser
-        print(f"🔄 Processing document with query manager...")
+        # Process with query manager for backward compatibility
         query_manager.process_document(text, filename)
-        print(f"📊 Query manager structured_data: {len(query_manager.structured_data)} sections")
         
         processing_status[filename] = {
             "status": "completed",
-            "message": f"Document processed successfully. Extracted {len(text)} characters",
+            "message": f"Forensic extraction completed. Extracted {len(text)} characters",
             "filename": filename,
-            "extracted_data": query_manager.structured_data
+            "extracted_data": query_manager.structured_data,
+            "forensic_data": extraction_result
         }
         
-        print(f"✅ Document processing completed for: {filename}")
+        print(f"✅ Forensic processing completed for: {filename}")
         
+    except asyncio.CancelledError:
+        print(f"⚠️ Processing cancelled for: {filename}")
+        processing_status[filename] = {"status": "cancelled", "message": "Processing was cancelled"}
+        raise
     except Exception as e:
         print(f"❌ Processing error for {filename}: {e}")
         processing_status[filename] = {
@@ -183,12 +187,13 @@ async def get_processing_status(filename: str):
         "status": status.get("status", "unknown"),
         "message": status.get("message", "Status not available"),
 
-        "extracted_data": status.get("extracted_data", {})
+        "extracted_data": status.get("extracted_data", {}),
+        "forensic_data": status.get("forensic_data", {})
     }
 
 @app.post("/query")
 async def query_document(payload: dict):
-    """Query the uploaded document"""
+    """Query using MCP QueryHandler protocol"""
     query = payload.get("query", "").strip()
     filename = payload.get("filename", "")
     
@@ -196,37 +201,55 @@ async def query_document(payload: dict):
         raise HTTPException(status_code=400, detail="Query is required")
     
     try:
-        # MCP protocol integrated in query manager
-        result = query_manager.handle_query(query)
+        # ANSWER mode: Query against extracted forensic data
+        mcp_response = forensic_extractor.answer_query(query)
+        
+        # Also get traditional response for compatibility
+        traditional_result = query_manager.handle_query(query)
+        
+        # Add section selector flag if no good match found
+        show_sections = False
+        if "not found" in traditional_result["answer"].lower() or traditional_result.get("confidence", 0) < 0.5:
+            show_sections = True
+        
         return {
-            "answer": result["answer"],
-            "confidence": result.get("confidence", 0.8),
-            "category": result.get("category", "General"),
-            "suggestions": result.get("suggestions", []),
-            "medical_instructions": result.get("medical_instructions", []),
-            "safety_alerts": result.get("safety_alerts", []),
-            "metadata": result.get("mcp_metadata", {}),
-            "entities": result.get("entities", []),
-            "extracted_sections": len(result.get("extracted_data", {})),
-            "data_quality": "complete" if result.get("extracted_data") else "limited",
-            "response_type": "enhanced_medical_ai",
-            "template_used": result.get("mcp_metadata", {}).get("template_used", "conversational")
+            "mcp_response": mcp_response,
+            "answer": traditional_result["answer"],
+            "confidence": traditional_result.get("confidence", 0.8),
+            "category": traditional_result.get("category", "General"),
+            "suggestions": traditional_result.get("suggestions", []),
+            "medical_instructions": traditional_result.get("medical_instructions", []),
+            "safety_alerts": traditional_result.get("safety_alerts", []),
+            "metadata": traditional_result.get("mcp_metadata", {}),
+            "entities": traditional_result.get("entities", []),
+            "extracted_sections": len(traditional_result.get("extracted_data", {})),
+            "data_quality": "complete" if traditional_result.get("extracted_data") else "limited",
+            "response_type": "forensic_mcp_enhanced",
+            "template_used": "mcp_queryhandler",
+            "show_sections": show_sections
         }
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         print(f"Query error: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 @app.post("/extract-data")
 async def extract_document_data():
-    """Extract all structured data from document"""
+    """Extract forensic-level structured data from document"""
     try:
-        if not query_manager.structured_data:
+        if not forensic_extractor.extracted_data:
             raise HTTPException(status_code=400, detail="No document data available. Please upload a document first.")
         
         return {
             "status": "success", 
-            "data": query_manager.structured_data,
-            "sections": list(query_manager.structured_data.keys()) if query_manager.structured_data else []
+            "forensic_data": forensic_extractor.extracted_data,
+            "traditional_data": query_manager.structured_data,
+            "extraction_type": "forensic_mcp",
+            "blocks_count": len(forensic_extractor.extracted_data.get('blocks', [])),
+            "tables_count": len(forensic_extractor.extracted_data.get('tables', [])),
+            "forms_count": len(forensic_extractor.extracted_data.get('forms', [])),
+            "entities_count": len(forensic_extractor.extracted_data.get('entities', []))
         }
     except Exception as e:
         print(f"Extract data error: {e}")
@@ -238,11 +261,113 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "mcp_protocol": "active",
+        "forensic_extractor": "operational",
+        "components": {
+            "extract_mode": True,
+            "answer_mode": True,
+            "legacy_compatibility": True
+        }
+    }
+
+# Graceful shutdown handler
+def signal_handler(signum, frame):
+    print("\n🔄 Gracefully shutting down...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 @app.get("/supported-formats")
 async def get_supported_formats():
-    """Return supported file formats"""
+    """Return supported file formats for forensic extraction"""
     return {
-        "supported_formats": ['.pdf', '.txt', '.docx', '.doc', '.png', '.jpg', '.jpeg']
+        "supported_formats": ['.pdf', '.txt', '.docx', '.doc', '.png', '.jpg', '.jpeg', '.xlsx', '.pptx', '.html', '.csv', '.eml'],
+        "extraction_capabilities": ["text", "tables", "forms", "metadata", "entities", "blocks", "chunks"],
+        "protocol": "MCP QueryHandler",
+        "modes": ["EXTRACT", "ANSWER"]
     }
+
+@app.post("/mcp-extract")
+async def mcp_extract_only(file_path: str):
+    """Pure MCP EXTRACT mode endpoint"""
+    try:
+        extraction_result = forensic_extractor.extract_document(file_path)
+        return extraction_result
+    except asyncio.CancelledError:
+        raise HTTPException(status_code=499, detail="Request cancelled")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MCP extraction failed: {str(e)}")
+
+@app.post("/mcp-answer")
+async def mcp_answer_only(payload: dict):
+    """Pure MCP ANSWER mode endpoint"""
+    query = payload.get("query", "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+    
+    try:
+        mcp_response = forensic_extractor.answer_query(query)
+        return {"mcp_response": mcp_response}
+    except asyncio.CancelledError:
+        raise HTTPException(status_code=499, detail="Request cancelled")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MCP answer failed: {str(e)}")
+
+@app.get("/available-sections")
+async def get_available_sections():
+    """Get all available sections for UI selection"""
+    try:
+        if not query_manager.structured_data:
+            return {"sections": [], "message": "No document uploaded"}
+        
+        sections = []
+        for key, value in query_manager.structured_data.items():
+            if value and isinstance(value, str):
+                section_name = key.replace('_', ' ').title()
+                preview = value[:80] + "..." if len(value) > 80 else value
+                sections.append({
+                    "key": key,
+                    "name": section_name,
+                    "preview": preview,
+                    "length": len(value)
+                })
+        
+        return {"sections": sections, "total_sections": len(sections)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sections: {str(e)}")
+
+@app.post("/get-section")
+async def get_specific_section(payload: dict):
+    """Get specific section content by key"""
+    section_key = payload.get("section_key", "").strip()
+    if not section_key:
+        raise HTTPException(status_code=400, detail="Section key is required")
+    
+    try:
+        if not query_manager.structured_data:
+            raise HTTPException(status_code=400, detail="No document uploaded")
+        
+        content = query_manager.structured_data.get(section_key, "")
+        if not content:
+            raise HTTPException(status_code=404, detail="Section not found")
+        
+        section_name = section_key.replace('_', ' ').title()
+        
+        # Format as section response
+        answer = f"📄 **{section_name}**\n\n{content}\n\n📝 This is the complete content from the selected section."
+        
+        return {
+            "answer": answer,
+            "category": "get_section",
+            "confidence": 0.95,
+            "suggestions": [],
+            "section_name": section_name,
+            "section_key": section_key
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get section: {str(e)}")

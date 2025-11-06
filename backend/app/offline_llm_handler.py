@@ -10,12 +10,16 @@ from datetime import datetime
 import numpy as np
 
 try:
+    import warnings
+    warnings.filterwarnings("ignore", category=UserWarning)
     from transformers import pipeline, AutoTokenizer, AutoModel
     from sentence_transformers import SentenceTransformer
+    import transformers
+    transformers.logging.set_verbosity_error()
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print("⚠️ Transformers not available, using rule-based approach")
+    # Silently fall back to rule-based approach - this is expected and works fine
 
 try:
     import spacy
@@ -23,7 +27,7 @@ try:
     SPACY_AVAILABLE = True
 except (ImportError, OSError):
     SPACY_AVAILABLE = False
-    print("⚠️ spaCy not available, using basic NLP")
+    # Silently fall back to basic NLP - this is expected and works fine
 
 class OfflineLLMHandler:
     def __init__(self):
@@ -159,9 +163,13 @@ class OfflineLLMHandler:
         
         if TRANSFORMERS_AVAILABLE:
             try:
-                # Use lightweight models for better performance
-                self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
-                self.medical_ner = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
+                # Suppress warnings during model loading
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    # Use lightweight models for better performance
+                    self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+                    self.medical_ner = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
                 print("✅ Advanced NLP components loaded")
             except Exception as e:
                 print(f"⚠️ Could not load advanced NLP: {e}")
@@ -191,10 +199,8 @@ class OfflineLLMHandler:
         base_answer = self._multi_strategy_answer(processed_question, context)
         confidence = self._calculate_confidence(base_answer, question, context)
         
-        # Apply advanced templating with medical intelligence - force patient_friendly for ChatGPT style
-        template_type = 'patient_friendly'  # Always use patient_friendly for consistent ChatGPT-style responses
-        template_func = self.response_templates[template_type]
-        enhanced_answer = template_func(question, base_answer, intent, medical_entities)
+        # Use simple formatting for speed
+        enhanced_answer = base_answer
         
         # Generate medical instructions and suggestions
         medical_instructions = self.instruction_generator.generate_instructions(question, base_answer, medical_entities)
