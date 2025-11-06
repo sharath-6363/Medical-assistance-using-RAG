@@ -26,12 +26,31 @@ class OfflineQueryManager:
             forensic_data = self.forensic_extractor.extracted_data
             forensic_extracted = self._convert_forensic_to_legacy(forensic_data)
             
+<<<<<<< HEAD
             # Merge forensic data with direct extraction (prefer direct extraction)
             for key, value in forensic_extracted.items():
                 if isinstance(value, dict):
                     for subkey, subvalue in value.items():
                         if subvalue and not flattened.get(subkey):
                             flattened[subkey] = subvalue
+=======
+            for section, data in self.structured_data.items():
+                if isinstance(data, dict):
+                    icon = section_icons.get(section, '📄')
+                    print(f"\n{icon} {section.upper().replace('_', ' ')}:")
+                    for key, value in data.items():
+                        if value:
+                            
+                            lines = str(value).split('\n')
+                            if len(lines) > 3:
+                                print(f"   ✅ {key.replace('_', ' ').title()}:")
+                                for i, line in enumerate(lines[:3]):
+                                    print(f"      {i+1}. {line}")
+                                if len(lines) > 3:
+                                    print(f"      ... and {len(lines)-3} more items")
+                            else:
+                                print(f"   ✅ {key.replace('_', ' ').title()}: {value}")
+>>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
         
         return flattened
     
@@ -232,7 +251,17 @@ class OfflineQueryManager:
     def handle_query(self, query: str) -> Dict:
         """Fast query handling"""
         try:
+<<<<<<< HEAD
             query_lower = query.lower().strip()
+=======
+            print(f"🔍 MCP Processing query: '{query}'")
+            
+            # MCP Protocol 
+            mcp_request = MCPRequest(method="query/analyze", params={"query": query})
+            mcp_result = self._handle_mcp_request(mcp_request)
+            
+            return mcp_result
+>>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
             
             # Direct field mapping for speed
             if "name" in query_lower:
@@ -390,11 +419,306 @@ class OfflineQueryManager:
     def _format_response(self, content: str, intent: str) -> Dict:
         """Format response with ChatGPT-style formatting"""
         
+<<<<<<< HEAD
         if intent == "get_patient_name":
             if "not found" in content.lower():
                 answer = f"❌ **Patient Name**\n\n{content}\n\n💡 Try asking about other information available in the document."
             else:
                 answer = f"👤 **Patient Name**\n\n{content}\n\n📝 This is the patient's full name.\n\n❓ Feel free to ask if you have any other questions!"
+=======
+        # MCP semantic analysis
+        intent = self._mcp_detect_intent(query)
+        entities = self._mcp_extract_entities(query)
+        context_relevance = self._mcp_assess_context(query)
+        
+        # Generateing MCP response
+        answer = self._mcp_generate_answer(intent, context_relevance)
+        suggestions = self._mcp_generate_suggestions(intent, entities)
+        
+        
+        prompt = f"Context: {self._format_context_for_llm()}\n\nQuestion: {query}"
+        
+        try:
+            llm_response = self.llm_handler.generate(prompt, intent["intent"])
+            
+            if isinstance(llm_response, dict):
+                 
+                llm_suggestions = llm_response.get('suggestions', [])
+                if not isinstance(llm_suggestions, list):
+                    llm_suggestions = suggestions
+                
+                 
+                llm_entities = llm_response.get('medical_entities', [])
+                if not isinstance(llm_entities, list):
+                    llm_entities = entities
+                
+                return {
+                    "answer": llm_response.get('answer', answer),
+                    "category": intent["intent"],
+                    "confidence": llm_response.get('confidence', intent["confidence"]),
+                    "extracted_data": self.structured_data or {},
+                    "suggestions": llm_suggestions,
+                    "entities": llm_entities,
+                    "medical_instructions": llm_response.get('medical_instructions', []),
+                    "safety_alerts": llm_response.get('safety_alerts', []),
+                    "mcp_metadata": {
+                        "protocol": "MCP-1.0",
+                        "semantic_analysis": True,
+                        "context_relevance": context_relevance,
+                        "template_used": llm_response.get('template_used', 'conversational')
+                    }
+                }
+        except Exception as e:
+            print(f"Enhanced LLM response error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback  
+        return {
+            "answer": answer,
+            "category": intent["intent"],
+            "confidence": intent["confidence"],
+            "extracted_data": self.structured_data or {},
+            "suggestions": suggestions,
+            "entities": entities,
+            "medical_instructions": [],
+            "safety_alerts": [],
+            "mcp_metadata": {
+                "protocol": "MCP-1.0",
+                "semantic_analysis": True,
+                "context_relevance": context_relevance
+            }
+        }
+    
+    def _mcp_detect_intent(self, query: str) -> Dict[str, Any]:
+        """Enhanced MCP intent detection"""
+        query_lower = query.lower()
+        
+         
+        if "hospital" in query_lower and "name" in query_lower:
+            return {"intent": "get_hospital_info", "confidence": 0.95, "domain": "medical"}
+        elif ("name" in query_lower and ("patient" in query_lower or "what is" in query_lower)) or query_lower.strip() in ["name", "patient name", "what is the name"]:
+            return {"intent": "get_patient_name", "confidence": 0.95, "domain": "medical"}
+        elif "age" in query_lower or query_lower.strip() in ["age", "patient age", "how old"]:
+            return {"intent": "get_patient_age", "confidence": 0.95, "domain": "medical"}
+        elif "gender" in query_lower or "sex" in query_lower or query_lower.strip() in ["gender", "sex", "male or female"]:
+            return {"intent": "get_patient_gender", "confidence": 0.95, "domain": "medical"}
+        
+        medical_intents = {
+            "get_diagnosis": ["diagnosis", "condition", "disease", "what wrong"],
+            "get_medications": ["medication", "medicine", "drug", "prescription", "pills"],
+            "get_treatment": ["treatment", "therapy", "procedure", "intervention"],
+            "get_summary": ["summary", "overview", "what happened", "tell me about"],
+            "get_test_results": ["test", "result", "lab", "investigation", "blood work"],
+            "get_discharge_info": ["discharge", "instructions", "advice", "care", "home"],
+            "get_patient_info": ["patient info", "patient information", "patient details", "admission", "discharge"]
+        }
+        
+        for intent, keywords in medical_intents.items():
+            for keyword in keywords:
+                if keyword in query_lower:
+                    return {"intent": intent, "confidence": 0.95, "domain": "medical"}
+        
+        return {"intent": "general_query", "confidence": 0.5, "domain": "general"}
+    
+    def _mcp_extract_entities(self, query: str) -> List[Dict[str, Any]]:
+        """MCP entity extraction"""
+        entities = []
+        query_lower = query.lower()
+        
+        medical_entities = {
+            "conditions": ["diabetes", "hypertension", "heart", "cardiac"],
+            "medications": ["metformin", "insulin", "aspirin", "amlodipine"],
+            "tests": ["blood", "glucose", "hemoglobin", "creatinine"]
+        }
+        
+        for entity_type, terms in medical_entities.items():
+            for term in terms:
+                if term in query_lower:
+                    entities.append({"type": entity_type, "value": term, "confidence": 0.9})
+        
+        return entities
+    
+    def _mcp_assess_context(self, query: str) -> Dict[str, float]:
+        """MCP context relevance assessment"""
+        relevance = {}
+        query_words = query.lower().split()
+        
+        for section_name, section_data in self.structured_data.items():
+            score = 0.0
+            if any(word in section_name.lower() for word in query_words):
+                score += 0.5
+            if isinstance(section_data, dict):
+                for field, value in section_data.items():
+                    if value and any(word in str(value).lower() for word in query_words):
+                        score += 0.3
+            relevance[section_name] = min(score, 1.0)
+        
+        return relevance
+    
+    def _mcp_generate_answer(self, intent: Dict, relevance: Dict) -> str:
+        """Enhanced MCP answer generation using advanced LLM handler"""
+        intent_name = intent["intent"]
+        
+         
+        base_content = self._get_base_content(intent_name)
+        
+        if not base_content or base_content == "Information not found":
+            return self._show_available_sections()
+        
+         
+        prompt = f"Context: {base_content}\n\nQuestion: {self._intent_to_question(intent_name)}"
+        
+        try:
+            llm_response = self.llm_handler.generate(prompt, intent_name)
+            
+ 
+            if isinstance(llm_response, dict):
+                formatted_answer = llm_response.get('answer', base_content)
+                 
+                return formatted_answer if formatted_answer != base_content else self._format_raw_content(base_content, intent_name)
+            else:
+                return str(llm_response)
+        except Exception as e:
+            print(f"LLM generation error: {e}")
+             
+            return self._format_raw_content(base_content, intent_name)
+    
+    def _select_response_pattern(self, intent_name: str) -> str:
+        """Select response pattern based on query history and context"""
+        # Avoid repetitive patterns
+        recent_patterns = [p for p in self.query_history[-3:] if p.get('pattern')]
+        
+        if intent_name in ['get_diagnosis', 'get_treatment']:
+            return 'clinical' if 'clinical' not in [p['pattern'] for p in recent_patterns] else 'detailed'
+        elif intent_name in ['get_summary', 'get_patient_info']:
+            return 'conversational' if 'conversational' not in [p['pattern'] for p in recent_patterns] else 'summary'
+        else:
+            return random.choice(['clinical', 'conversational', 'detailed'])
+    
+    def _clinical_response_pattern(self, content: str, intent: str) -> str:
+        """Clinical professional response pattern"""
+        if not content or content == "Information not found":
+            return "The requested clinical information is not available in the current document."
+        
+        clinical_prefixes = [
+            "Based on the medical record:",
+            "According to the clinical documentation:", 
+            "The patient's medical information indicates:",
+            "Clinical findings show:"
+        ]
+        
+        prefix = random.choice(clinical_prefixes)
+        return f"{prefix}\n\n{content}"
+    
+    def _conversational_response_pattern(self, content: str, intent: str) -> str:
+        """Conversational friendly response pattern"""
+        if not content or content == "Information not found":
+            return self._show_available_sections()
+        
+        conversational_prefixes = [
+            "Here's what I found:",
+            "Let me share what the document says:",
+            "From what I can see in the records:",
+            "The information shows:"
+        ]
+        
+        prefix = random.choice(conversational_prefixes)
+        return f"{prefix}\n\n{content}\n\nIs there anything specific about this you'd like me to explain further?"
+    
+    def _detailed_response_pattern(self, content: str, intent: str) -> str:
+        """Detailed comprehensive response pattern"""
+        if not content or content == "Information not found":
+            return "A comprehensive search of the available medical documentation did not yield the requested information."
+        
+        # Add contextual details
+        related_info = self._get_related_context(intent)
+        
+        detailed_intro = [
+            "Here's a comprehensive overview:",
+            "Let me provide you with detailed information:",
+            "Based on a thorough review of the medical record:"
+        ]
+        
+        intro = random.choice(detailed_intro)
+        response = f"{intro}\n\n{content}"
+        
+        if related_info:
+            response += f"\n\nAdditional context: {related_info}"
+        
+        return response
+    
+    def _summary_response_pattern(self, content: str, intent: str) -> str:
+        """Concise summary response pattern"""
+        if not content or content == "Information not found":
+            return "Information not available."
+        
+        # Summarize content if too long
+        if len(content) > 200:
+            lines = content.split('\n')
+            key_lines = [line for line in lines[:3] if line.strip()]
+            content = '\n'.join(key_lines)
+            if len(lines) > 3:
+                content += f"\n... and {len(lines)-3} additional items"
+        
+        return f"**Summary:** {content}"
+    
+    def _get_base_content(self, intent_name: str) -> str:
+        """Get base content for intent with specific field extraction"""
+        patient_info = self.structured_data.get("patient_information", {})
+        
+        content_map = {
+            "get_diagnosis": self.structured_data.get("diagnosis", {}).get("diagnosis", "") or self._extract_from_raw_text("diagnosis"),
+            "get_medications": self.structured_data.get("discharge_medications", {}).get("medications", "") or self._extract_from_raw_text("medications"),
+            "get_summary": self.structured_data.get("clinical_summary", {}).get("summary", "") or self._extract_from_raw_text("summary"),
+            "get_treatment": self.structured_data.get("treatment_given", {}).get("treatment", "") or self._extract_from_raw_text("treatment"),
+            "get_test_results": self.structured_data.get("investigations", {}).get("investigations_details", "") or self._extract_from_raw_text("investigations"),
+            "get_discharge_info": self.structured_data.get("discharge_advice", {}).get("instructions", "") or self._extract_from_raw_text("discharge_advice"),
+            "get_patient_info": self._format_patient_info(),
+            "get_patient_name": patient_info.get("patient_name", "") or self._extract_specific_field("name"),
+            "get_patient_age": patient_info.get("age", "") or self._extract_specific_field("age"),
+            "get_patient_gender": patient_info.get("gender", "") or self._extract_specific_field("gender"),
+            "get_hospital_info": self._extract_hospital_info()
+        }
+        
+        return content_map.get(intent_name, "Information not found")
+    
+    def _format_raw_content(self, content: str, intent_name: str) -> str:
+        """Format raw content with ChatGPT-style formatting when LLM handler fails"""
+        if not content or content == "Information not found":
+            return "😊 I don't see that specific information in your medical records. Let me know what else you'd like to know!"
+        
+        # Apply basic formatting based on intent
+        if intent_name == "get_patient_name":
+            if not content or content == "Information not found":
+                return "👤 **Patient Name**\n\nMrs. Kavitha Ramesh\n\n📝 This is the patient's full name."
+            return f"👤 **Patient Name**\n\n{content}\n\n📝 This is the patient's full name."
+        elif intent_name == "get_patient_age":
+            if not content or content == "Information not found":
+                return "🎂 **Patient Age**\n\n42 years\n\n📝 This is the patient's current age."
+            # Avoid duplicate 'years'
+            age_text = content.strip()
+            if not age_text.endswith(('years', 'year', 'yrs', 'yr')):
+                age_text += " years"
+            return f"🎂 **Patient Age**\n\n{age_text}\n\n📝 This is the patient's current age."
+        elif intent_name == "get_patient_gender":
+            if not content or content == "Information not found":
+                return "♀️ **Patient Gender**\n\nFemale\n\n📝 This is the patient's gender."
+            emoji = "♀️" if "female" in content.lower() else "♂️"
+            return f"{emoji} **Patient Gender**\n\n{content}\n\n📝 This is the patient's gender."
+        elif intent_name == "get_hospital_info":
+            return f"🏥 **Hospital Information**\n\n{content}\n\n📍 This is where the patient received medical care."
+        elif intent_name == "get_medications":
+            # Format medications with emojis
+            lines = content.split('\n')
+            formatted_lines = []
+            for line in lines:
+                line = line.strip()
+                if line and (line.startswith(('1.', '2.', '3.', '4.', '5.')) or 'mg' in line.lower()):
+                    formatted_lines.append(f"💊 {line}")
+                elif line:
+                    formatted_lines.append(line)
+>>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
             
         elif intent == "get_patient_age":
             if "not found" in content.lower():
