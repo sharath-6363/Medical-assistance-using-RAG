@@ -18,39 +18,17 @@ class OfflineQueryManager:
 
     def _extract_all_data(self, text: str) -> Dict[str, Any]:
         """Extract data directly from text - no hardcoded fallbacks"""
-        # Always extract from the actual text content
         flattened = self._direct_extraction(text)
         
-        # Also try forensic extraction if available
         if hasattr(self.forensic_extractor, 'extracted_data') and self.forensic_extractor.extracted_data:
             forensic_data = self.forensic_extractor.extracted_data
             forensic_extracted = self._convert_forensic_to_legacy(forensic_data)
             
-<<<<<<< HEAD
-            # Merge forensic data with direct extraction (prefer direct extraction)
             for key, value in forensic_extracted.items():
                 if isinstance(value, dict):
                     for subkey, subvalue in value.items():
                         if subvalue and not flattened.get(subkey):
                             flattened[subkey] = subvalue
-=======
-            for section, data in self.structured_data.items():
-                if isinstance(data, dict):
-                    icon = section_icons.get(section, '📄')
-                    print(f"\n{icon} {section.upper().replace('_', ' ')}:")
-                    for key, value in data.items():
-                        if value:
-                            
-                            lines = str(value).split('\n')
-                            if len(lines) > 3:
-                                print(f"   ✅ {key.replace('_', ' ').title()}:")
-                                for i, line in enumerate(lines[:3]):
-                                    print(f"      {i+1}. {line}")
-                                if len(lines) > 3:
-                                    print(f"      ... and {len(lines)-3} more items")
-                            else:
-                                print(f"   ✅ {key.replace('_', ' ').title()}: {value}")
->>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
         
         return flattened
     
@@ -58,7 +36,6 @@ class OfflineQueryManager:
         """Convert forensic extraction format to legacy format"""
         legacy_data = {}
         
-        # Extract patient info from forms
         patient_info = {}
         for form in forensic_data.get('forms', []):
             key = form.get('key', '').lower()
@@ -77,17 +54,14 @@ class OfflineQueryManager:
         
         legacy_data['patient_information'] = patient_info
         
-        # Extract diagnosis from blocks
         diagnosis_info = {}
         for block in forensic_data.get('blocks', []):
             if block.get('block_type') == 'heading' and 'diagnosis' in block.get('text', '').lower():
-                # Find next paragraph blocks for diagnosis content
                 diagnosis_info['diagnosis'] = block.get('text', '')
                 break
         
         legacy_data['diagnosis'] = diagnosis_info
         
-        # Extract other sections from blocks
         clinical_info = {'summary': forensic_data.get('full_text', '')[:500]}
         legacy_data['clinical_summary'] = clinical_info
         
@@ -97,7 +71,6 @@ class OfflineQueryManager:
         """Comprehensive extraction of ALL sections from uploaded document"""
         data = {}
         
-        # Extract ALL sections dynamically - get complete text for each section
         sections_patterns = {
             'patient_name': [
                 r"Patient Name\s*:?\s*([A-Za-z\s\.R]+)",
@@ -141,7 +114,6 @@ class OfflineQueryManager:
             ]
         }
         
-        # Extract simple fields
         for field, patterns in sections_patterns.items():
             for pattern in patterns:
                 match = re.search(pattern, text, re.IGNORECASE)
@@ -151,7 +123,6 @@ class OfflineQueryManager:
                         data[field] = value
                         break
         
-        # Extract complete sections with full text - improved patterns
         complete_sections = {
             'chief_complaints': [
                 r"CHIEF COMPLAINTS?\s*:?\s*([\s\S]*?)(?=\n\s*[A-Z][A-Z\s]{4,}:|\Z)",
@@ -217,33 +188,28 @@ class OfflineQueryManager:
             ]
         }
         
-        # Extract complete sections with better formatting
         for section, patterns in complete_sections.items():
             for pattern in patterns:
                 match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
                 if match:
                     content = match.group(1).strip()
-                    # Clean and format content properly
-                    content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)  # Normalize line breaks
-                    content = re.sub(r'^\s*:?\s*', '', content)  # Remove leading colons/spaces
-                    content = re.sub(r'\s+$', '', content)  # Remove trailing spaces
-                    # Preserve numbered lists and bullet points
-                    content = re.sub(r'\n(\d+\.)', '\n\n\1', content)  # Add space before numbered items
-                    content = re.sub(r'\n([•-])', '\n\n\1', content)  # Add space before bullet points
+                    content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+                    content = re.sub(r'^\s*:?\s*', '', content)
+                    content = re.sub(r'\s+$', '', content)
+                    content = re.sub(r'\n(\d+\.)', '\n\n\\1', content)
+                    content = re.sub(r'\n([•-])', '\n\n\\1', content)
                     if content and len(content) > 3:
                         data[section] = content
                         break
         
-        # Extract any additional sections dynamically with better formatting
         additional_sections = re.findall(r'^([A-Z][A-Z\s]{2,})\s*:?\s*([\s\S]*?)(?=\n\s*[A-Z][A-Z\s]{4,}:|\Z)', text, re.MULTILINE)
         for section_name, content in additional_sections:
             section_key = section_name.lower().replace(' ', '_').replace('/', '_').replace('-', '_')
             if section_key not in data and content.strip() and len(content.strip()) > 10:
-                # Format additional sections properly
                 formatted_content = content.strip()
                 formatted_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', formatted_content)
-                formatted_content = re.sub(r'\n(\d+\.)', '\n\n\1', formatted_content)
-                formatted_content = re.sub(r'\n([•-])', '\n\n\1', formatted_content)
+                formatted_content = re.sub(r'\n(\d+\.)', '\n\n\\1', formatted_content)
+                formatted_content = re.sub(r'\n([•-])', '\n\n\\1', formatted_content)
                 data[section_key] = formatted_content
         
         return data
@@ -251,19 +217,8 @@ class OfflineQueryManager:
     def handle_query(self, query: str) -> Dict:
         """Fast query handling"""
         try:
-<<<<<<< HEAD
             query_lower = query.lower().strip()
-=======
-            print(f"🔍 MCP Processing query: '{query}'")
             
-            # MCP Protocol 
-            mcp_request = MCPRequest(method="query/analyze", params={"query": query})
-            mcp_result = self._handle_mcp_request(mcp_request)
-            
-            return mcp_result
->>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
-            
-            # Direct field mapping for speed
             if "name" in query_lower:
                 patient_name = self.structured_data.get("patient_name", "")
                 if not patient_name:
@@ -290,10 +245,8 @@ class OfflineQueryManager:
                     medications = "No medication information found in the document"
                 return self._format_response(medications, "get_medications")
             elif "instruction" in query_lower or ("discharge" in query_lower and "advice" in query_lower):
-                # Look for discharge instructions/advice
                 advice = self.structured_data.get("discharge_advice", "")
                 if not advice:
-                    # Try alternative keys for instructions
                     for key in ['discharge_instructions', 'follow_up_advice', 'instructions', 'advice']:
                         if self.structured_data.get(key):
                             advice = self.structured_data[key]
@@ -337,31 +290,34 @@ class OfflineQueryManager:
                     doctor = "No doctor information found in the document"
                 return self._format_response(doctor, "get_doctor")
             else:
-                # Search through ALL available data for any matches
+                # Smart search for exact matches
+                exact_answer = self._smart_search(query_lower)
+                if exact_answer:
+                    return exact_answer
+                
                 search_results = []
                 query_words = [word for word in query_lower.split() if len(word) > 2]
                 
                 for key, value in self.structured_data.items():
                     if value and isinstance(value, str):
                         value_lower = value.lower()
-                        # Skip disclaimer sections for medical queries
                         if "instruction" in query_lower and "disclaimer" in key.lower():
                             continue
-                        # Check if any query words match in this section
                         matches = sum(1 for word in query_words if word in value_lower)
                         if matches > 0:
                             search_results.append((key, value, matches))
                 
                 if search_results:
-                    # Sort by number of matches and return the best one
                     search_results.sort(key=lambda x: x[2], reverse=True)
                     best_match = search_results[0]
                     section_name = best_match[0].replace('_', ' ').title()
                     content = best_match[1]
                     
-                    # Format as proper section response with better formatting
-                    formatted_content = self._format_section_content(content)
-                    answer = f"🔍 **Found in {section_name}:**\n\n{formatted_content}\n\n💡 This information was found based on your search."
+                    # Extract only relevant part
+                    relevant_content = self._extract_relevant_content(query_lower, content)
+                    formatted_content = self._format_clean_answer(relevant_content)
+                    
+                    answer = f"📋 **{self._get_answer_title(query_lower)}**\n\n{formatted_content}\n\n✨ Hope this helps! Feel free to ask more questions."
                     
                     return {
                         "answer": answer,
@@ -382,11 +338,10 @@ class OfflineQueryManager:
                         available_info.append(key.replace('_', ' '))
                 
                 if available_info:
-                    # Create clickable sections for chat window
                     clickable_sections = []
                     section_buttons = []
                     
-                    for i, info in enumerate(available_info[:12]):  # Show first 12
+                    for i, info in enumerate(available_info[:12]):
                         section_key = list(self.structured_data.keys())[i] if i < len(self.structured_data) else info.replace(' ', '_').lower()
                         clickable_sections.append(f"• **{info}**")
                         section_buttons.append({"key": section_key, "name": info})
@@ -419,306 +374,11 @@ class OfflineQueryManager:
     def _format_response(self, content: str, intent: str) -> Dict:
         """Format response with ChatGPT-style formatting"""
         
-<<<<<<< HEAD
         if intent == "get_patient_name":
             if "not found" in content.lower():
                 answer = f"❌ **Patient Name**\n\n{content}\n\n💡 Try asking about other information available in the document."
             else:
                 answer = f"👤 **Patient Name**\n\n{content}\n\n📝 This is the patient's full name.\n\n❓ Feel free to ask if you have any other questions!"
-=======
-        # MCP semantic analysis
-        intent = self._mcp_detect_intent(query)
-        entities = self._mcp_extract_entities(query)
-        context_relevance = self._mcp_assess_context(query)
-        
-        # Generateing MCP response
-        answer = self._mcp_generate_answer(intent, context_relevance)
-        suggestions = self._mcp_generate_suggestions(intent, entities)
-        
-        
-        prompt = f"Context: {self._format_context_for_llm()}\n\nQuestion: {query}"
-        
-        try:
-            llm_response = self.llm_handler.generate(prompt, intent["intent"])
-            
-            if isinstance(llm_response, dict):
-                 
-                llm_suggestions = llm_response.get('suggestions', [])
-                if not isinstance(llm_suggestions, list):
-                    llm_suggestions = suggestions
-                
-                 
-                llm_entities = llm_response.get('medical_entities', [])
-                if not isinstance(llm_entities, list):
-                    llm_entities = entities
-                
-                return {
-                    "answer": llm_response.get('answer', answer),
-                    "category": intent["intent"],
-                    "confidence": llm_response.get('confidence', intent["confidence"]),
-                    "extracted_data": self.structured_data or {},
-                    "suggestions": llm_suggestions,
-                    "entities": llm_entities,
-                    "medical_instructions": llm_response.get('medical_instructions', []),
-                    "safety_alerts": llm_response.get('safety_alerts', []),
-                    "mcp_metadata": {
-                        "protocol": "MCP-1.0",
-                        "semantic_analysis": True,
-                        "context_relevance": context_relevance,
-                        "template_used": llm_response.get('template_used', 'conversational')
-                    }
-                }
-        except Exception as e:
-            print(f"Enhanced LLM response error: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # Fallback  
-        return {
-            "answer": answer,
-            "category": intent["intent"],
-            "confidence": intent["confidence"],
-            "extracted_data": self.structured_data or {},
-            "suggestions": suggestions,
-            "entities": entities,
-            "medical_instructions": [],
-            "safety_alerts": [],
-            "mcp_metadata": {
-                "protocol": "MCP-1.0",
-                "semantic_analysis": True,
-                "context_relevance": context_relevance
-            }
-        }
-    
-    def _mcp_detect_intent(self, query: str) -> Dict[str, Any]:
-        """Enhanced MCP intent detection"""
-        query_lower = query.lower()
-        
-         
-        if "hospital" in query_lower and "name" in query_lower:
-            return {"intent": "get_hospital_info", "confidence": 0.95, "domain": "medical"}
-        elif ("name" in query_lower and ("patient" in query_lower or "what is" in query_lower)) or query_lower.strip() in ["name", "patient name", "what is the name"]:
-            return {"intent": "get_patient_name", "confidence": 0.95, "domain": "medical"}
-        elif "age" in query_lower or query_lower.strip() in ["age", "patient age", "how old"]:
-            return {"intent": "get_patient_age", "confidence": 0.95, "domain": "medical"}
-        elif "gender" in query_lower or "sex" in query_lower or query_lower.strip() in ["gender", "sex", "male or female"]:
-            return {"intent": "get_patient_gender", "confidence": 0.95, "domain": "medical"}
-        
-        medical_intents = {
-            "get_diagnosis": ["diagnosis", "condition", "disease", "what wrong"],
-            "get_medications": ["medication", "medicine", "drug", "prescription", "pills"],
-            "get_treatment": ["treatment", "therapy", "procedure", "intervention"],
-            "get_summary": ["summary", "overview", "what happened", "tell me about"],
-            "get_test_results": ["test", "result", "lab", "investigation", "blood work"],
-            "get_discharge_info": ["discharge", "instructions", "advice", "care", "home"],
-            "get_patient_info": ["patient info", "patient information", "patient details", "admission", "discharge"]
-        }
-        
-        for intent, keywords in medical_intents.items():
-            for keyword in keywords:
-                if keyword in query_lower:
-                    return {"intent": intent, "confidence": 0.95, "domain": "medical"}
-        
-        return {"intent": "general_query", "confidence": 0.5, "domain": "general"}
-    
-    def _mcp_extract_entities(self, query: str) -> List[Dict[str, Any]]:
-        """MCP entity extraction"""
-        entities = []
-        query_lower = query.lower()
-        
-        medical_entities = {
-            "conditions": ["diabetes", "hypertension", "heart", "cardiac"],
-            "medications": ["metformin", "insulin", "aspirin", "amlodipine"],
-            "tests": ["blood", "glucose", "hemoglobin", "creatinine"]
-        }
-        
-        for entity_type, terms in medical_entities.items():
-            for term in terms:
-                if term in query_lower:
-                    entities.append({"type": entity_type, "value": term, "confidence": 0.9})
-        
-        return entities
-    
-    def _mcp_assess_context(self, query: str) -> Dict[str, float]:
-        """MCP context relevance assessment"""
-        relevance = {}
-        query_words = query.lower().split()
-        
-        for section_name, section_data in self.structured_data.items():
-            score = 0.0
-            if any(word in section_name.lower() for word in query_words):
-                score += 0.5
-            if isinstance(section_data, dict):
-                for field, value in section_data.items():
-                    if value and any(word in str(value).lower() for word in query_words):
-                        score += 0.3
-            relevance[section_name] = min(score, 1.0)
-        
-        return relevance
-    
-    def _mcp_generate_answer(self, intent: Dict, relevance: Dict) -> str:
-        """Enhanced MCP answer generation using advanced LLM handler"""
-        intent_name = intent["intent"]
-        
-         
-        base_content = self._get_base_content(intent_name)
-        
-        if not base_content or base_content == "Information not found":
-            return self._show_available_sections()
-        
-         
-        prompt = f"Context: {base_content}\n\nQuestion: {self._intent_to_question(intent_name)}"
-        
-        try:
-            llm_response = self.llm_handler.generate(prompt, intent_name)
-            
- 
-            if isinstance(llm_response, dict):
-                formatted_answer = llm_response.get('answer', base_content)
-                 
-                return formatted_answer if formatted_answer != base_content else self._format_raw_content(base_content, intent_name)
-            else:
-                return str(llm_response)
-        except Exception as e:
-            print(f"LLM generation error: {e}")
-             
-            return self._format_raw_content(base_content, intent_name)
-    
-    def _select_response_pattern(self, intent_name: str) -> str:
-        """Select response pattern based on query history and context"""
-        # Avoid repetitive patterns
-        recent_patterns = [p for p in self.query_history[-3:] if p.get('pattern')]
-        
-        if intent_name in ['get_diagnosis', 'get_treatment']:
-            return 'clinical' if 'clinical' not in [p['pattern'] for p in recent_patterns] else 'detailed'
-        elif intent_name in ['get_summary', 'get_patient_info']:
-            return 'conversational' if 'conversational' not in [p['pattern'] for p in recent_patterns] else 'summary'
-        else:
-            return random.choice(['clinical', 'conversational', 'detailed'])
-    
-    def _clinical_response_pattern(self, content: str, intent: str) -> str:
-        """Clinical professional response pattern"""
-        if not content or content == "Information not found":
-            return "The requested clinical information is not available in the current document."
-        
-        clinical_prefixes = [
-            "Based on the medical record:",
-            "According to the clinical documentation:", 
-            "The patient's medical information indicates:",
-            "Clinical findings show:"
-        ]
-        
-        prefix = random.choice(clinical_prefixes)
-        return f"{prefix}\n\n{content}"
-    
-    def _conversational_response_pattern(self, content: str, intent: str) -> str:
-        """Conversational friendly response pattern"""
-        if not content or content == "Information not found":
-            return self._show_available_sections()
-        
-        conversational_prefixes = [
-            "Here's what I found:",
-            "Let me share what the document says:",
-            "From what I can see in the records:",
-            "The information shows:"
-        ]
-        
-        prefix = random.choice(conversational_prefixes)
-        return f"{prefix}\n\n{content}\n\nIs there anything specific about this you'd like me to explain further?"
-    
-    def _detailed_response_pattern(self, content: str, intent: str) -> str:
-        """Detailed comprehensive response pattern"""
-        if not content or content == "Information not found":
-            return "A comprehensive search of the available medical documentation did not yield the requested information."
-        
-        # Add contextual details
-        related_info = self._get_related_context(intent)
-        
-        detailed_intro = [
-            "Here's a comprehensive overview:",
-            "Let me provide you with detailed information:",
-            "Based on a thorough review of the medical record:"
-        ]
-        
-        intro = random.choice(detailed_intro)
-        response = f"{intro}\n\n{content}"
-        
-        if related_info:
-            response += f"\n\nAdditional context: {related_info}"
-        
-        return response
-    
-    def _summary_response_pattern(self, content: str, intent: str) -> str:
-        """Concise summary response pattern"""
-        if not content or content == "Information not found":
-            return "Information not available."
-        
-        # Summarize content if too long
-        if len(content) > 200:
-            lines = content.split('\n')
-            key_lines = [line for line in lines[:3] if line.strip()]
-            content = '\n'.join(key_lines)
-            if len(lines) > 3:
-                content += f"\n... and {len(lines)-3} additional items"
-        
-        return f"**Summary:** {content}"
-    
-    def _get_base_content(self, intent_name: str) -> str:
-        """Get base content for intent with specific field extraction"""
-        patient_info = self.structured_data.get("patient_information", {})
-        
-        content_map = {
-            "get_diagnosis": self.structured_data.get("diagnosis", {}).get("diagnosis", "") or self._extract_from_raw_text("diagnosis"),
-            "get_medications": self.structured_data.get("discharge_medications", {}).get("medications", "") or self._extract_from_raw_text("medications"),
-            "get_summary": self.structured_data.get("clinical_summary", {}).get("summary", "") or self._extract_from_raw_text("summary"),
-            "get_treatment": self.structured_data.get("treatment_given", {}).get("treatment", "") or self._extract_from_raw_text("treatment"),
-            "get_test_results": self.structured_data.get("investigations", {}).get("investigations_details", "") or self._extract_from_raw_text("investigations"),
-            "get_discharge_info": self.structured_data.get("discharge_advice", {}).get("instructions", "") or self._extract_from_raw_text("discharge_advice"),
-            "get_patient_info": self._format_patient_info(),
-            "get_patient_name": patient_info.get("patient_name", "") or self._extract_specific_field("name"),
-            "get_patient_age": patient_info.get("age", "") or self._extract_specific_field("age"),
-            "get_patient_gender": patient_info.get("gender", "") or self._extract_specific_field("gender"),
-            "get_hospital_info": self._extract_hospital_info()
-        }
-        
-        return content_map.get(intent_name, "Information not found")
-    
-    def _format_raw_content(self, content: str, intent_name: str) -> str:
-        """Format raw content with ChatGPT-style formatting when LLM handler fails"""
-        if not content or content == "Information not found":
-            return "😊 I don't see that specific information in your medical records. Let me know what else you'd like to know!"
-        
-        # Apply basic formatting based on intent
-        if intent_name == "get_patient_name":
-            if not content or content == "Information not found":
-                return "👤 **Patient Name**\n\nMrs. Kavitha Ramesh\n\n📝 This is the patient's full name."
-            return f"👤 **Patient Name**\n\n{content}\n\n📝 This is the patient's full name."
-        elif intent_name == "get_patient_age":
-            if not content or content == "Information not found":
-                return "🎂 **Patient Age**\n\n42 years\n\n📝 This is the patient's current age."
-            # Avoid duplicate 'years'
-            age_text = content.strip()
-            if not age_text.endswith(('years', 'year', 'yrs', 'yr')):
-                age_text += " years"
-            return f"🎂 **Patient Age**\n\n{age_text}\n\n📝 This is the patient's current age."
-        elif intent_name == "get_patient_gender":
-            if not content or content == "Information not found":
-                return "♀️ **Patient Gender**\n\nFemale\n\n📝 This is the patient's gender."
-            emoji = "♀️" if "female" in content.lower() else "♂️"
-            return f"{emoji} **Patient Gender**\n\n{content}\n\n📝 This is the patient's gender."
-        elif intent_name == "get_hospital_info":
-            return f"🏥 **Hospital Information**\n\n{content}\n\n📍 This is where the patient received medical care."
-        elif intent_name == "get_medications":
-            # Format medications with emojis
-            lines = content.split('\n')
-            formatted_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and (line.startswith(('1.', '2.', '3.', '4.', '5.')) or 'mg' in line.lower()):
-                    formatted_lines.append(f"💊 {line}")
-                elif line:
-                    formatted_lines.append(line)
->>>>>>> a232cd8c699644b2654aa45a7f3be6872b2930a9
             
         elif intent == "get_patient_age":
             if "not found" in content.lower():
@@ -738,7 +398,6 @@ class OfflineQueryManager:
             if "not found" in content.lower():
                 answer = f"❌ **Diagnosis**\n\n{content}"
             else:
-                # Format diagnosis with emojis
                 lines = content.split('\n')
                 formatted_lines = []
                 for line in lines:
@@ -755,7 +414,6 @@ class OfflineQueryManager:
             if "not found" in content.lower():
                 answer = f"❌ **Medications**\n\n{content}"
             else:
-                # Format medications with emojis
                 lines = content.split('\n')
                 formatted_lines = []
                 for line in lines:
@@ -802,7 +460,7 @@ class OfflineQueryManager:
             if "not found" in content.lower():
                 answer = f"❌ **Doctor Information**\n\n{content}"
             else:
-                answer = f"👨‍⚕️ **Consulting Doctor**\n\n{content}\n\n🩺 This is the doctor who treated the patient."
+                answer = f"👨⚕️ **Consulting Doctor**\n\n{content}\n\n🩺 This is the doctor who treated the patient."
         
         elif intent == "get_discharge_info":
             if "not found" in content.lower():
@@ -817,15 +475,14 @@ class OfflineQueryManager:
                 answer = f"📝 **Clinical Summary**\n\n{content}\n\n📊 This summarizes the patient's condition and treatment."
             
         elif intent == "search_result":
-            answer = content  # Content already formatted in search logic
+            answer = content
         
         elif intent == "section_list":
-            answer = content  # Content already formatted with clickable sections
+            answer = content
         
         else:
             answer = f"📝 **Medical Information**\n\n{content}\n\n😊 Hope this helps! Feel free to ask more questions.\n\n❓ Feel free to ask if you have any other questions!"
 
-        # Generate suggestions
         suggestions = self._generate_suggestions(intent)
         
         return {
@@ -842,25 +499,7 @@ class OfflineQueryManager:
     def _generate_suggestions(self, intent: str) -> List[str]:
         """Generate contextual suggestions"""
         suggestions = []
-        # Generate suggestions based on available data
-        if self.structured_data.get('diagnosis'):
-            suggestions.append("🩺 What is the diagnosis?")
-        if self.structured_data.get('medications'):
-            suggestions.append("💊 What medications were prescribed?")
-        if self.structured_data.get('chief_complaints'):
-            suggestions.append("🤒 What were the chief complaints?")
-        if self.structured_data.get('history'):
-            suggestions.append("📋 What is the medical history?")
-        if self.structured_data.get('temperature'):
-            suggestions.append("🌡️ What was the temperature?")
-        if self.structured_data.get('investigations'):
-            suggestions.append("🔬 What were the investigation results?")
-        if self.structured_data.get('treatment'):
-            suggestions.append("🏥 What treatment was given?")
-        if self.structured_data.get('discharge_advice') or self.structured_data.get('discharge_instructions'):
-            suggestions.append("📋 What are the discharge instructions?")
         
-        # Generate suggestions based on ALL available data in document
         suggestion_map = {
             'patient_name': "👤 What is the patient's name?",
             'age': "🎂 What is the patient's age?",
@@ -900,26 +539,134 @@ class OfflineQueryManager:
         if not content:
             return content
         
-        # Clean up content
         formatted = content.strip()
-        
-        # Add proper spacing for numbered lists
-        formatted = re.sub(r'(\d+\.)\s*', r'\n\1 ', formatted)
-        
-        # Add proper spacing for bullet points
-        formatted = re.sub(r'([•-])\s*', r'\n\1 ', formatted)
-        
-        # Clean up extra newlines
+        formatted = re.sub(r'(\d+\.)\s*', r'\n\\1 ', formatted)
+        formatted = re.sub(r'([•-])\s*', r'\n\\1 ', formatted)
         formatted = re.sub(r'\n\s*\n\s*\n+', '\n\n', formatted)
         formatted = re.sub(r'^\n+', '', formatted)
         
-        # Add emojis for common medical terms
-        formatted = re.sub(r'(\d+\.)\s*(.*(?:mg|tablet|capsule|daily|twice).*)', r'\1 💊 \2', formatted, flags=re.IGNORECASE)
-        formatted = re.sub(r'(\d+\.)\s*(.*(?:follow|visit|appointment).*)', r'\1 📅 \2', formatted, flags=re.IGNORECASE)
-        formatted = re.sub(r'(\d+\.)\s*(.*(?:diet|food|eat).*)', r'\1 🍽️ \2', formatted, flags=re.IGNORECASE)
-        formatted = re.sub(r'(\d+\.)\s*(.*(?:exercise|walk|activity).*)', r'\1 🚶 \2', formatted, flags=re.IGNORECASE)
+        formatted = re.sub(r'(\d+\.)\s*(.*(?:mg|tablet|capsule|daily|twice).*)', r'\\1 💊 \\2', formatted, flags=re.IGNORECASE)
+        formatted = re.sub(r'(\d+\.)\s*(.*(?:follow|visit|appointment).*)', r'\\1 📅 \\2', formatted, flags=re.IGNORECASE)
+        formatted = re.sub(r'(\d+\.)\s*(.*(?:diet|food|eat).*)', r'\\1 🍽️ \\2', formatted, flags=re.IGNORECASE)
+        formatted = re.sub(r'(\d+\.)\s*(.*(?:exercise|walk|activity).*)', r'\\1 🚶 \\2', formatted, flags=re.IGNORECASE)
         
         return formatted
+    
+    def _smart_search(self, query: str) -> Optional[Dict]:
+        """Smart search for exact answers"""
+        # Hospital name search
+        if "hospital" in query:
+            for key, value in self.structured_data.items():
+                if isinstance(value, str) and any(word in value.lower() for word in ['hospital', 'medical center']):
+                    hospital_match = re.search(r'([A-Za-z\s]+(?:Hospital|Medical Center|Clinic))', value, re.IGNORECASE)
+                    if hospital_match:
+                        hospital_name = hospital_match.group(1).strip()
+                        return {
+                            "answer": f"🏥 **Hospital Name**\n\n{hospital_name}\n\n📍 This is where the patient received medical care.",
+                            "category": "hospital_info",
+                            "confidence": 0.95,
+                            "suggestions": self._generate_suggestions("hospital_info"),
+                            "medical_instructions": [],
+                            "safety_alerts": [],
+                            "entities": [],
+                            "extracted_data": self.structured_data
+                        }
+        
+        # Discharge date search
+        if "discharge" in query and "date" in query:
+            for key, value in self.structured_data.items():
+                if isinstance(value, str):
+                    date_match = re.search(r'Date of Discharge[:\s]*([^\n]+)', value, re.IGNORECASE)
+                    if date_match:
+                        discharge_date = date_match.group(1).strip()
+                        return {
+                            "answer": f"📅 **Discharge Date**\n\n{discharge_date}\n\n🏠 This is when the patient was discharged from the hospital.",
+                            "category": "discharge_date",
+                            "confidence": 0.95,
+                            "suggestions": self._generate_suggestions("discharge_date"),
+                            "medical_instructions": [],
+                            "safety_alerts": [],
+                            "entities": [],
+                            "extracted_data": self.structured_data
+                        }
+        
+        return None
+    
+    def _extract_relevant_content(self, query: str, content: str) -> str:
+        """Extract only relevant part of content based on query"""
+        lines = content.split('\n')
+        relevant_lines = []
+        
+        query_words = query.split()
+        for line in lines:
+            line = line.strip()
+            if line and any(word in line.lower() for word in query_words if len(word) > 2):
+                # Clean line formatting
+                clean_line = re.sub(r'\\\d+\s*', '', line)  # Remove \1 artifacts
+                clean_line = re.sub(r'&amp;', '&', clean_line)  # Fix HTML entities
+                clean_line = re.sub(r'&#39;', "'", clean_line)  # Fix apostrophes
+                
+                # Skip incomplete sentences
+                if clean_line and not self._is_incomplete_sentence(clean_line):
+                    relevant_lines.append(clean_line)
+        
+        return '\n'.join(relevant_lines[:5])  # Limit to 5 most relevant lines
+    
+    def _format_clean_answer(self, content: str) -> str:
+        """Format content as clean, readable answer"""
+        if not content:
+            return "Information not found in the document."
+        
+        lines = content.split('\n')
+        formatted_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if line:
+                # Add bullet points for lists
+                if line.startswith(('1.', '2.', '3.', '4.', '5.')):
+                    formatted_lines.append(f"• {line[2:].strip()}")
+                elif not line.startswith('•'):
+                    formatted_lines.append(f"• {line}")
+                else:
+                    formatted_lines.append(line)
+        
+        return '\n'.join(formatted_lines)
+    
+    def _is_incomplete_sentence(self, sentence: str) -> bool:
+        """Check if sentence is incomplete or cut off"""
+        sentence = sentence.strip()
+        
+        # Skip if ends with incomplete phrases
+        incomplete_endings = [
+            'for any', 'based on', 'at the time of', 'in case of', 'please contact',
+            'this discharge', 'the patient', 'condition at', 'issued based'
+        ]
+        
+        for ending in incomplete_endings:
+            if sentence.lower().endswith(ending):
+                return True
+        
+        # Skip very short fragments
+        if len(sentence) < 10:
+            return True
+            
+        return False
+    
+    def _get_answer_title(self, query: str) -> str:
+        """Get appropriate title for the answer"""
+        if "hospital" in query:
+            return "Hospital Information"
+        elif "discharge" in query and "date" in query:
+            return "Discharge Date"
+        elif "investigation" in query or "test" in query:
+            return "Investigation Results"
+        elif "treatment" in query:
+            return "Treatment Information"
+        elif "medication" in query:
+            return "Medications"
+        else:
+            return "Medical Information"
     
     def get_mcp_response(self, query: str) -> str:
         """Get MCP QueryHandler response"""

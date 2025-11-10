@@ -212,6 +212,9 @@ class OfflineLLMHandler:
         # Store conversation context
         self._update_conversation_context(question, final_answer, medical_entities)
         
+        # Determine template type used
+        template_type = self._select_template_type(question, intent)
+        
         return {
             'answer': final_answer,
             'suggestions': smart_suggestions,
